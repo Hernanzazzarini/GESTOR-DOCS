@@ -1,0 +1,26 @@
+<div class="pagina">
+  <app-encabezado titulo="Inicio"></app-encabezado>
+
+  <main class="contenido">
+    <h2>¿Qué querés hacer?</h2>
+    <p class="subtitle">Elegí un módulo para empezar.</p>
+
+    @if (cargando) {
+      <p class="cargando">Cargando…</p>
+    } @else if (!tarjetas.length) {
+      <div class="card vacio">
+        Tu usuario no tiene módulos habilitados. Consultá al administrador.
+      </div>
+    } @else {
+      <div class="grilla">
+        @for (t of tarjetas; track t.ruta) {
+          <a class="tarjeta" [routerLink]="t.ruta">
+            <span class="tarjeta-icono" aria-hidden="true">{{ t.icono }}</span>
+            <span class="tarjeta-titulo">{{ t.titulo }}</span>
+            <span class="tarjeta-texto">{{ t.texto }}</span>
+          </a>
+        }
+      </div>
+    }
+  </main>
+</div>

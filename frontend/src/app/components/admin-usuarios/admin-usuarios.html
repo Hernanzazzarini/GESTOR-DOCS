@@ -1,0 +1,133 @@
+<div class="admin-container">
+  <app-encabezado titulo="Gestión de Usuarios"></app-encabezado>
+  
+    <main class="content">
+      <div class="card">
+        <h2>Agregar Usuario</h2>
+        <p class="subtitle">El usuario podrá ingresar con este correo y contraseña.</p>
+
+        <form [formGroup]="nuevoUsuarioForm" (ngSubmit)="crearUsuario()">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="nuevo-email">Correo electrónico</label>
+              <input id="nuevo-email" type="email" formControlName="email" placeholder="usuario@olega.com.ar" />
+            </div>
+            <div class="form-group">
+              <label for="nuevo-password">Contraseña</label>
+              <input id="nuevo-password" type="text" formControlName="password" placeholder="Mínimo 6 caracteres" autocomplete="off" />
+            </div>
+            <div class="form-group form-group-rol">
+              <label for="nuevo-rol">Rol</label>
+              <select id="nuevo-rol" formControlName="role">
+                <option *ngFor="let r of roles" [value]="r.id">{{ r.texto }}</option>
+              </select>
+            </div>
+          </div>
+
+          <p class="nota">Encargado y Administrador además pueden eliminar documentos.</p>
+
+          <fieldset class="permisos">
+            <legend>Módulos que puede ver</legend>
+            <p *ngIf="nuevoUsuarioForm.value.role === 'admin'" class="nota">
+              El administrador ve todos los módulos y la Gestión de Usuarios.
+            </p>
+            <div *ngIf="nuevoUsuarioForm.value.role !== 'admin'" class="casillas">
+              <label *ngFor="let p of pantallas" class="casilla">
+                <input
+                  type="checkbox"
+                  [checked]="pantallasNuevo.has(p.id)"
+                  (change)="alternar(pantallasNuevo, p.id)"
+                />
+                {{ p.texto }}
+              </label>
+            </div>
+          </fieldset>
+
+          <div *ngIf="mensajeExito" class="alert success-alert">{{ mensajeExito }}</div>
+          <div *ngIf="mensajeError" class="alert error-alert">{{ mensajeError }}</div>
+
+          <button type="submit" class="btn-primary" [disabled]="nuevoUsuarioForm.invalid || creando">
+            {{ creando ? 'Creando...' : 'Crear usuario' }}
+          </button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Usuarios Registrados</h2>
+        <p class="subtitle">Roles y módulos que puede ver cada usuario.</p>
+  
+        <div *ngIf="loading" class="loading">Cargando usuarios...</div>
+  
+        <div *ngIf="!loading && usuarios.length === 0" class="empty">
+          No se encontraron usuarios en la base de datos.
+        </div>
+  
+        <table *ngIf="!loading && usuarios.length > 0" class="users-table">
+          <thead>
+            <tr>
+              <th>Correo Electrónico</th>
+              <th>Rol</th>
+              <th>Módulos</th>
+              <th>Fecha de Alta</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ng-container *ngFor="let u of usuarios">
+            <tr>
+              <td>{{ u.email }}</td>
+              <td>
+                <span class="badge" [ngClass]="'badge-' + u.role">
+                  {{ u.role }}
+                </span>
+              </td>
+              <td>
+                <span *ngIf="u.role === 'admin'" class="nota">Todas</span>
+                <ng-container *ngIf="u.role !== 'admin'">
+                  <span *ngIf="!textosPantallas(u).length" class="nota">Ninguna</span>
+                  <span *ngFor="let t of textosPantallas(u)" class="chip">{{ t }}</span>
+                  <button
+                    *ngIf="editando !== u.uid"
+                    type="button"
+                    class="btn-link"
+                    (click)="editar(u)"
+                  >
+                    Editar permisos
+                  </button>
+                </ng-container>
+              </td>
+              <td>{{ u.createdAt?.toDate() | date:'short' }}</td>
+            </tr>
+            <tr *ngIf="editando === u.uid" class="fila-edicion">
+              <td colspan="4">
+                <div class="casillas">
+                  <label *ngFor="let p of pantallas" class="casilla">
+                    <input
+                      type="checkbox"
+                      [checked]="seleccion.has(p.id)"
+                      (change)="alternar(seleccion, p.id)"
+                    />
+                    {{ p.texto }}
+                  </label>
+                </div>
+                <p *ngIf="errorPermisos" class="alert error-alert">{{ errorPermisos }}</p>
+                <div class="acciones-edicion">
+                  <button type="button" class="btn-secundario" (click)="cancelarEdicion()">
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-guardar"
+                    [disabled]="guardando"
+                    (click)="guardarPermisos(u)"
+                  >
+                    {{ guardando ? 'Guardando...' : 'Guardar permisos' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+            </ng-container>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>

@@ -1,0 +1,40 @@
+<div class="pagina">
+  <app-encabezado titulo="Documentación"></app-encabezado>
+
+  <main class="contenido">
+    <p class="migas"><a routerLink="/">Inicio</a> › Documentación</p>
+    <h2>Elegí una categoría</h2>
+    <p class="subtitle">Los PDF se guardan en Drive, en la carpeta "Documentos generales".</p>
+
+    @if (cargando) {
+      <p class="cargando">
+        Cargando categorías…
+        @if (demorado) {
+          <br />El servidor se está iniciando, puede tardar hasta un minuto.
+        }
+      </p>
+    } @else if (error) {
+      <div class="alert error-alert">
+        {{ error }}
+        <button type="button" class="btn-link" (click)="cargar()">Reintentar</button>
+      </div>
+    } @else {
+      <div class="grilla">
+        @for (c of categorias; track c.id) {
+          <a class="tarjeta" [routerLink]="['/documentos', c.id]">
+            <span class="tarjeta-icono" aria-hidden="true">🗂️</span>
+            <span class="tarjeta-titulo">{{ c.nombre }}</span>
+            @if (c.descripcion) {
+              <span class="tarjeta-texto">{{ c.descripcion }}</span>
+            }
+            <span class="tarjeta-texto">
+              @for (t of c.tipos; track t.id; let ultimo = $last) {
+                {{ t.nombre }}{{ ultimo ? '' : ' · ' }}
+              }
+            </span>
+          </a>
+        }
+      </div>
+    }
+  </main>
+</div>

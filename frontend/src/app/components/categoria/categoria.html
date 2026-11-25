@@ -1,0 +1,442 @@
+<div class="pagina">
+  <app-encabezado [titulo]="categoria?.nombre ?? 'Documentación'"></app-encabezado>
+
+  <main class="contenido">
+    <p class="migas">
+      <a routerLink="/">Inicio</a> › <a routerLink="/documentos">Documentación</a>
+      @if (categoria) {
+        › {{ categoria.nombre }}
+      }
+    </p>
+
+    @if (cargandoCategoria) {
+      <p class="cargando">Cargando…</p>
+    } @else if (error) {
+      <div class="alert error-alert">{{ error }}</div>
+    } @else if (noExiste) {
+      <div class="card vacio">
+        La categoría no existe. <a routerLink="/documentos">Volver a Documentación</a>
+      </div>
+    } @else if (categoria) {
+      <!-- Título de la sección -->
+      <div class="cabecera">
+        <div>
+          <h2 class="titulo">{{ categoria.nombre }}</h2>
+          @if (categoria.descripcion) {
+            <p class="subtitle">{{ categoria.descripcion }}</p>
+          }
+        </div>
+        @if (!formularioAbierto) {
+          <button type="button" class="btn-primary btn-subir" (click)="abrirFormulario()">
+            <span aria-hidden="true">＋</span> Subir documento
+          </button>
+        }
+      </div>
+
+      <!-- Tipos -->
+      <nav class="tipos" aria-label="Tipo de análisis">
+        @for (t of categoria.tipos; track t.id) {
+          <button
+            type="button"
+            class="tipo"
+            [class.activo]="t.id === tipo"
+            [attr.aria-current]="t.id === tipo ? 'page' : null"
+            [disabled]="progreso !== null"
+            (click)="cambiarTipo(t.id)"
+          >
+            <span class="tipo-icono" aria-hidden="true">{{ iconoTipo(t.id) }}</span>
+            <span class="tipo-nombre">{{ t.nombre }}</span>
+          </button>
+        }
+      </nav>
+
+      @if (mensajeExito && !formularioAbierto) {
+        <div class="alert success-alert">{{ mensajeExito }}</div>
+      }
+
+      <!-- Subir (o editar los datos de un documento) -->
+      @if (formularioAbierto) {
+        <section class="card formulario" [class.formulario-edicion]="editando">
+          <div class="formulario-cabecera">
+            <div>
+              @if (editando) {
+                <h3>Editar documento</h3>
+                <p class="nota">Cambiás los datos de "{{ editando.nombre }}". El PDF queda igual.</p>
+              } @else {
+                <h3>Subir documento a {{ nombreTipo }}</h3>
+                <p class="nota ruta">
+                  <span aria-hidden="true">📁</span>
+                  Documentos generales › {{ categoria.nombre }} › {{ nombreTipo }} › <b>{{ anioDestino }}</b>
+                </p>
+              }
+            </div>
+            <button type="button" class="cerrar" (click)="cerrarFormulario()" [disabled]="progreso !== null" aria-label="Cerrar">×</button>
+          </div>
+
+          <fieldset class="pasos" [disabled]="progreso !== null">
+            <!-- 1. Archivo -->
+            @if (!editando) {
+              <div class="paso">
+                <span class="paso-numero">1</span>
+                <div class="paso-cuerpo">
+                  <span class="paso-titulo">Archivo PDF</span>
+                  @if (archivo) {
+                    <div class="archivo-elegido">
+                      <span class="archivo-icono" aria-hidden="true">📄</span>
+                      <div class="archivo-info">
+                        <b>{{ archivo.name }}</b>
+                        <small class="nota">{{ formatearTamanio(archivo.size) }}</small>
+                      </div>
+                      <button type="button" class="btn-link" (click)="quitarArchivo()">Cambiar</button>
+                    </div>
+                  } @else {
+                    <label
+                      class="zona-archivo"
+                      [class.arrastrando]="arrastrando"
+                      (dragover)="alArrastrar($event, true)"
+                      (dragleave)="alArrastrar($event, false)"
+                      (drop)="alSoltar($event)"
+                    >
+                      <input #selectorArchivo type="file" accept="application/pdf,.pdf" (change)="elegirArchivo($event)" />
+                      <span class="zona-icono" aria-hidden="true">⬆</span>
+                      <span><b>Arrastrá el PDF acá</b> o hacé clic para elegirlo</span>
+                      <small class="nota">Solo PDF, hasta 20 MB</small>
+                    </label>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- 2. Datos -->
+            <div class="paso">
+              <span class="paso-numero">{{ editando ? 1 : 2 }}</span>
+              <div class="paso-cuerpo">
+                <span class="paso-titulo">Datos del documento</span>
+                <div class="grilla-campos">
+                  <div class="campo campo-ancho">
+                    <label for="nombre">Nombre del archivo</label>
+                    <input id="nombre" type="text" maxlength="150" [(ngModel)]="datos.nombre" placeholder="Se usa el nombre del PDF" />
+                  </div>
+
+                  <div class="campo">
+                    <label for="area">Área <span class="obligatorio">*</span></label>
+                    <input id="area" type="text" maxlength="60" list="areas-usadas" [(ngModel)]="datos.area" placeholder="Ej.: Calidad" />
+                    <datalist id="areas-usadas">
+                      @for (a of areas; track a) {
+                        <option [value]="a"></option>
+                      }
+                    </datalist>
+                  </div>
+
+                  <div class="campo">
+                    <label for="responsable">Responsable <span class="obligatorio">*</span></label>
+                    @if (usuarios.length) {
+                      <select id="responsable" [(ngModel)]="datos.responsable" [class.sin-elegir]="!datos.responsable">
+                        <option value="" disabled>Ingrese responsable</option>
+                        @for (u of opcionesResponsable; track u) {
+                          <option [value]="u">{{ u }}</option>
+                        }
+                      </select>
+                    } @else {
+                      <input id="responsable" type="email" maxlength="80" [(ngModel)]="datos.responsable" placeholder="Ingrese responsable (mail)" />
+                    }
+                  </div>
+
+                  <div class="campo">
+                    <label for="realizacion">Fecha de realización <span class="obligatorio">*</span></label>
+                    <input id="realizacion" type="date" [(ngModel)]="datos.fechaRealizacion" />
+                  </div>
+
+                  <div class="campo">
+                    <label for="vencimiento">Fecha de vencimiento</label>
+                    <input id="vencimiento" type="date" [min]="datos.fechaRealizacion" [(ngModel)]="datos.fechaVencimiento" />
+                    <small class="nota">Dejala vacía si no vence.</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Avisos -->
+            <div class="paso">
+              <span class="paso-numero">{{ editando ? 2 : 3 }}</span>
+              <div class="paso-cuerpo">
+                <span class="paso-titulo">Avisos por mail</span>
+                @if (!datos.fechaVencimiento) {
+                  <p class="nota sin-margen">Cargá una fecha de vencimiento para programar avisos.</p>
+                } @else {
+                  <div class="avisos">
+                    <div>
+                      <span class="etiqueta">Cuándo avisar</span>
+                      <div class="chips">
+                        @for (d of datos.diasAviso; track d) {
+                          <span class="chip">
+                            {{ describirAviso(d) }}
+                            <button type="button" class="chip-quitar" (click)="quitarDia(d)" [attr.aria-label]="'Quitar ' + describirAviso(d)">×</button>
+                          </span>
+                        } @empty {
+                          <span class="nota">Sin avisos: no se va a mandar ningún mail.</span>
+                        }
+                      </div>
+                      @if (datos.diasAviso.length < maximoDiasAviso) {
+                        <div class="agregar">
+                          <input
+                            type="number"
+                            min="0"
+                            max="365"
+                            [(ngModel)]="nuevoDia"
+                            (keydown.enter)="agregarDia()"
+                            placeholder="Días"
+                            aria-label="Días antes del vencimiento"
+                          />
+                          <button type="button" class="btn-link" (click)="agregarDia()">+ Agregar aviso</button>
+                          <small class="nota">0 = el día que vence</small>
+                        </div>
+                      }
+                    </div>
+
+                    <div>
+                      <span class="etiqueta">A quién avisar</span>
+                      <div class="chips">
+                        <span class="chip chip-fijo" title="El responsable siempre recibe el aviso">
+                          {{ datos.responsable || 'Responsable' }} <small>(responsable)</small>
+                        </span>
+                        @for (e of datos.avisar; track e) {
+                          <span class="chip">
+                            {{ e }}
+                            <button type="button" class="chip-quitar" (click)="quitarAvisar(e)" [attr.aria-label]="'Quitar ' + e">×</button>
+                          </span>
+                        }
+                      </div>
+                      @if (datos.avisar.length < maximoAvisar) {
+                        <div class="agregar">
+                          <input
+                            type="email"
+                            list="usuarios-avisar"
+                            [(ngModel)]="nuevoAvisar"
+                            (keydown.enter)="agregarAvisar()"
+                            placeholder="Elegí un usuario o escribí un mail"
+                            aria-label="Mail a quien avisar"
+                          />
+                          <datalist id="usuarios-avisar">
+                            @for (u of usuariosParaAvisar; track u) {
+                              <option [value]="u"></option>
+                            }
+                          </datalist>
+                          <button type="button" class="btn-link" (click)="agregarAvisar()">+ Agregar</button>
+                        </div>
+                      }
+                    </div>
+
+                    @if (errorAviso) {
+                      <div class="alert error-alert sin-margen">{{ errorAviso }}</div>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          </fieldset>
+
+          @if (progreso !== null && !editando) {
+            <div class="barra"><div class="barra-relleno" [style.width.%]="progreso"></div></div>
+          }
+          @if (mensajeExito) {
+            <div class="alert success-alert">{{ mensajeExito }}</div>
+          }
+          @if (errorSubida) {
+            <div class="alert error-alert">{{ errorSubida }}</div>
+          }
+
+          <div class="pie-formulario">
+            @if (faltante && (archivo || editando)) {
+              <span class="nota">{{ faltante }}</span>
+            }
+            <button type="button" class="btn-link" (click)="cerrarFormulario()" [disabled]="progreso !== null">Cancelar</button>
+            @if (editando) {
+              <button type="button" class="btn-primary" (click)="subir()" [disabled]="!!faltante || progreso !== null">
+                {{ progreso !== null ? 'Guardando…' : 'Guardar cambios' }}
+              </button>
+            } @else {
+              <button type="button" class="btn-primary" (click)="subir()" [disabled]="!!faltante || progreso !== null">
+                {{ progreso !== null ? 'Subiendo… ' + progreso + '%' : 'Subir documento' }}
+              </button>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Resumen del tipo -->
+      @if (!cargandoDocs && !errorDocs && docs.length) {
+        <div class="resumen">
+          <button type="button" class="dato" [class.activo]="!filtros.estado" (click)="alternarEstado('')">
+            <span class="dato-numero">{{ resumen.total }}</span>
+            <span class="dato-texto">Documentos</span>
+          </button>
+          <button type="button" class="dato dato-vencido" [class.activo]="filtros.estado === 'vencido'" (click)="alternarEstado('vencido')">
+            <span class="dato-numero">{{ resumen.vencido }}</span>
+            <span class="dato-texto">Vencidos</span>
+          </button>
+          <button type="button" class="dato dato-por-vencer" [class.activo]="filtros.estado === 'por-vencer'" (click)="alternarEstado('por-vencer')">
+            <span class="dato-numero">{{ resumen.porVencer }}</span>
+            <span class="dato-texto">Por vencer</span>
+          </button>
+          <button type="button" class="dato dato-vigente" [class.activo]="filtros.estado === 'vigente'" (click)="alternarEstado('vigente')">
+            <span class="dato-numero">{{ resumen.vigente }}</span>
+            <span class="dato-texto">Vigentes</span>
+          </button>
+        </div>
+      }
+
+      <!-- Lista -->
+      <section class="card lista">
+        <div class="cabecera-lista">
+          <h3>
+            <span aria-hidden="true">{{ iconoTipo(tipo) }}</span> {{ nombreTipo }}
+          </h3>
+          <button type="button" class="btn-link" (click)="cargarDocs()" [disabled]="cargandoDocs">↻ Actualizar</button>
+        </div>
+
+        @if (errorEliminar) {
+          <div class="alert error-alert">{{ errorEliminar }}</div>
+        }
+
+        @if (cargandoDocs) {
+          <p class="cargando">Cargando documentos…</p>
+        } @else if (errorDocs) {
+          <div class="alert error-alert">{{ errorDocs }}</div>
+        } @else if (!docs.length) {
+          <div class="vacio vacio-grande">
+            <span class="vacio-icono" aria-hidden="true">{{ iconoTipo(tipo) }}</span>
+            <p>Todavía no hay documentos de {{ nombreTipo }}.</p>
+            @if (!formularioAbierto) {
+              <button type="button" class="btn-primary" (click)="abrirFormulario()">Subir el primero</button>
+            }
+          </div>
+        } @else {
+          <!-- Años -->
+          <div class="anios" role="tablist" aria-label="Año de los análisis">
+            <button type="button" role="tab" class="anio" [class.activo]="!filtros.anio" [attr.aria-selected]="!filtros.anio" (click)="filtros.anio = ''">
+              Todos <span class="cantidad">{{ docs.length }}</span>
+            </button>
+            @for (a of anios; track a.anio) {
+              <button
+                type="button"
+                role="tab"
+                class="anio"
+                [class.activo]="filtros.anio === a.anio"
+                [attr.aria-selected]="filtros.anio === a.anio"
+                (click)="filtros.anio = a.anio"
+              >
+                {{ a.anio }} <span class="cantidad">{{ a.cantidad }}</span>
+              </button>
+            }
+          </div>
+
+          <!-- Búsqueda -->
+          <div class="barra-busqueda">
+            <div class="buscador">
+              <span class="buscador-icono" aria-hidden="true">🔍</span>
+              <input type="search" [(ngModel)]="filtros.texto" placeholder="Buscar por nombre, área o responsable" aria-label="Buscar" />
+            </div>
+            <select [(ngModel)]="filtros.area" aria-label="Filtrar por área">
+              <option value="">Todas las áreas</option>
+              @for (a of areas; track a) {
+                <option [value]="a">{{ a }}</option>
+              }
+            </select>
+            <select [(ngModel)]="filtros.estado" aria-label="Filtrar por vencimiento">
+              <option value="">Cualquier vencimiento</option>
+              <option value="vencido">Vencidos</option>
+              <option value="por-vencer">Por vencer</option>
+              <option value="vigente">Vigentes (no vencidos)</option>
+              <option value="sin-vencimiento">No vencen</option>
+            </select>
+          </div>
+
+          @if (hayFiltros) {
+            <p class="nota resultado">
+              {{ docsFiltrados.length }} documento{{ docsFiltrados.length === 1 ? '' : 's' }} encontrado{{ docsFiltrados.length === 1 ? '' : 's' }} ·
+              <button type="button" class="btn-link" (click)="limpiarFiltros()">Limpiar filtros</button>
+            </p>
+          }
+
+          @if (!docsFiltrados.length) {
+            <p class="vacio">Ningún documento coincide con la búsqueda.</p>
+          } @else {
+            <div class="tabla-contenedor">
+              <table class="tabla">
+                <thead>
+                  <tr>
+                    <th>Documento</th>
+                    <th>Área</th>
+                    <th>Realización</th>
+                    <th>Vencimiento</th>
+                    <th>Responsable</th>
+                    <th><span class="oculto">Acciones</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (d of docsFiltrados; track d.id) {
+                    <tr [class.fila-editando]="editando?.id === d.id">
+                      <td class="celda-nombre">
+                        <button type="button" class="doc" (click)="ver(d)" title="Abrir el PDF">
+                          <span class="doc-icono" aria-hidden="true">PDF</span>
+                          <span class="doc-texto">
+                            <span class="doc-nombre">{{ d.nombre }}</span>
+                            <small class="nota">
+                              {{ formatearTamanio(d.tamanio) }}{{ d.subidoPor ? ' · subido por ' + d.subidoPor : '' }}
+                            </small>
+                          </span>
+                        </button>
+                      </td>
+                      <td class="celda-area">
+                        @if (d.area) {
+                          <span class="area">{{ d.area }}</span>
+                        } @else {
+                          <span class="nota">—</span>
+                        }
+                      </td>
+                      <td class="sin-corte celda-fecha">{{ formatearFecha(d.fechaRealizacion) }}</td>
+                      <td class="celda-vencimiento">
+                        @if (d.fechaVencimiento) {
+                          <span class="sin-corte">{{ formatearFecha(d.fechaVencimiento) }}</span>
+                          <span [class]="'estado estado-' + estado(d)">
+                            {{ etiquetasEstado[estado(d)] }}
+                          </span>
+                          <small class="nota detalle">{{ detalleVencimiento(d) }} · {{ resumenAvisos(d) }}</small>
+                        } @else {
+                          <span class="nota">No vence</span>
+                        }
+                      </td>
+                      <td class="celda-autor">{{ d.responsable || '—' }}</td>
+                      <td class="acciones">
+                        @if (confirmando === d.id) {
+                          <span class="confirmar">
+                            ¿Eliminar?
+                            <button type="button" class="btn-link peligro" (click)="eliminar(d)" [disabled]="eliminando === d.id">
+                              {{ eliminando === d.id ? 'Eliminando…' : 'Sí, eliminar' }}
+                            </button>
+                            <button type="button" class="btn-link" (click)="confirmando = null" [disabled]="eliminando === d.id">
+                              No
+                            </button>
+                          </span>
+                        } @else {
+                          <button type="button" class="accion" (click)="ver(d)">Ver</button>
+                          @if (puedeEditar(d)) {
+                            <button type="button" class="accion" (click)="editar(d)">Editar</button>
+                          }
+                          @if (puedeEliminar) {
+                            <button type="button" class="accion accion-peligro" (click)="pedirConfirmacion(d)">Eliminar</button>
+                          }
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        }
+      </section>
+    }
+  </main>
+</div>
