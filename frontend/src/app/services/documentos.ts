@@ -8,6 +8,44 @@ import { environment } from '../../environments/environment';
 export interface Tipo {
   id: string;
   nombre: string;
+  agregado?: boolean; // true si lo agregó un usuario (no es de los fijos)
+}
+
+export const LARGO_MAXIMO_TIPO = 60;
+
+/** Formatos que se pueden subir (el back end los vuelve a controlar: config/formatos.js). */
+export const EXTENSIONES = ['pdf', 'docx', 'doc', 'xlsx', 'xls'];
+export const ACEPTA_ARCHIVOS = EXTENSIONES.map((e) => `.${e}`).join(',');
+
+/** "Informe.DOCX" → "docx" (o null si no es PDF, Word ni Excel). */
+export function extensionDe(nombre: string): string | null {
+  const ext = nombre.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? '';
+  return EXTENSIONES.includes(ext) ? ext : null;
+}
+
+/** "Informe.docx" → "Informe" (solo saca las extensiones permitidas). */
+export function sinExtension(nombre: string): string {
+  return extensionDe(nombre) ? nombre.replace(/\.[^.]+$/, '') : nombre;
+}
+
+/** Etiqueta corta y familia del archivo, para el ícono de la tabla. */
+export function tipoDeArchivo(formato: string): { etiqueta: string; clase: 'pdf' | 'word' | 'excel' } {
+  if (formato === 'docx' || formato === 'doc') return { etiqueta: 'DOC', clase: 'word' };
+  if (formato === 'xlsx' || formato === 'xls') return { etiqueta: 'XLS', clase: 'excel' };
+  return { etiqueta: 'PDF', clase: 'pdf' };
+}
+
+/**
+ * "Agua - Microbiológico" → "agua-microbiologico". Igual que en el back end (servicios/tipos.js):
+ * dos tipos con el mismo id se consideran el mismo nombre y no se pueden repetir.
+ */
+export function idDeNombre(nombre: string): string {
+  return nombre
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 export interface Categoria {
@@ -26,6 +64,7 @@ export interface RespuestaCategorias {
 export interface Documento {
   id: string;
   nombre: string;
+  formato: string; // "pdf", "docx", "doc", "xlsx" o "xls"
   tamanio: number; // bytes
   fecha: string; // ISO
   subidoPor: string | null;
@@ -37,9 +76,9 @@ export interface Documento {
   avisar: string[]; // mails que reciben el aviso además del responsable
 }
 
-/** Lo que se carga junto con el PDF (o al editarlo). */
+/** Lo que se carga junto con el archivo (o al editarlo). */
 export interface DatosDocumento {
-  nombre: string; // sin ".pdf"; vacío = el nombre del archivo
+  nombre: string; // sin la extensión; vacío = el nombre del archivo
   area: string;
   fechaRealizacion: string;
   fechaVencimiento: string; // vacío = no vence
@@ -94,11 +133,16 @@ export class DocumentosService {
     return this.categorias().pipe(map((r) => r.categorias.find((c) => c.id === id)));
   }
 
+  /** Agrega un tipo a la categoría. El back end responde 409 si el nombre ya existe. */
+  agregarTipo(categoria: string, nombre: string): Observable<Tipo> {
+    return this.http.post<Tipo>(`${this.api}/categorias/${encodeURIComponent(categoria)}/tipos`, { nombre });
+  }
+
   listar(categoria: string, tipo: string): Observable<Documento[]> {
     return this.http.get<Documento[]>(`${this.api}/documentos`, { params: { categoria, tipo } });
   }
 
-  /** Sube el PDF informando el progreso (para la barra de carga). */
+  /** Sube el archivo informando el progreso (para la barra de carga). */
   subir(categoria: string, tipo: string, archivo: File, datos: DatosDocumento): Observable<HttpEvent<Documento>> {
     const formulario = new FormData();
     // Los datos van ANTES del archivo para que el servidor ya los tenga al recibirlo
@@ -114,14 +158,15 @@ export class DocumentosService {
     });
   }
 
-  /** Cambia el nombre y los datos de un documento (el PDF queda igual). */
+  /** Cambia el nombre y los datos de un documento (el archivo queda igual). */
   actualizar(id: string, datos: DatosDocumento): Observable<Documento> {
     return this.http.patch<Documento>(`${this.api}/documentos/${id}`, datos);
   }
 
-  /** El PDF como Blob, para abrirlo en una pestaña nueva. */
-  archivo(id: string): Observable<Blob> {
-    return this.http.get(`${this.api}/documentos/${id}/archivo`, { responseType: 'blob' });
+  /** El archivo como Blob: para abrirlo en una pestaña nueva o guardarlo en la compu. */
+  archivo(id: string, descargar = false): Observable<Blob> {
+    const params = descargar ? { descargar: '1' } : undefined;
+    return this.http.get(`${this.api}/documentos/${id}/archivo`, { responseType: 'blob', params });
   }
 
   eliminar(id: string): Observable<void> {

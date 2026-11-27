@@ -3,7 +3,7 @@
 Este programa de Google (Apps Script) vive dentro de una planilla de Google en la carpeta
 **Documentos generales**.
 
-1. **Cada hora** actualiza la hoja **Documentos**, con una fila por cada PDF: categoría, tipo,
+1. **Cada hora** actualiza la hoja **Documentos**, con una fila por cada archivo (PDF, Word o Excel): categoría, tipo,
    área, fechas, estado, responsable, a quién se avisa y el link.
 2. **Todos los días, alrededor de las 7 de la mañana**, manda un mail al responsable de cada documento que llegó a uno de sus días de aviso.
    Las personas cargadas en "A quién avisar" van en copia.

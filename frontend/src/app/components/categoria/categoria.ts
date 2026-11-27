@@ -7,6 +7,7 @@ import { Subscription, combineLatest } from 'rxjs';
 import { EncabezadoComponent } from '../encabezado/encabezado';
 import { AuthService } from '../../services/auth';
 import {
+  ACEPTA_ARCHIVOS,
   Categoria,
   DIAS_AVISO,
   DIAS_AVISO_POR_DEFECTO,
@@ -17,6 +18,7 @@ import {
   FILTROS_VACIOS,
   FiltroEstado,
   Filtros,
+  LARGO_MAXIMO_TIPO,
   MAXIMO_AVISAR,
   MAXIMO_DIAS_AVISO,
   TAMANIO_MAXIMO,
@@ -29,6 +31,10 @@ import {
   formatearFecha,
   formatearTamanio,
   hoyIso,
+  extensionDe,
+  idDeNombre,
+  sinExtension,
+  tipoDeArchivo,
 } from '../../services/documentos';
 
 const DATOS_VACIOS: DatosDocumento = {
@@ -41,7 +47,7 @@ const DATOS_VACIOS: DatosDocumento = {
   avisar: [],
 };
 
-/** Ícono de cada tipo (si se agrega uno nuevo sin ícono, usa el de documento). */
+/** Ícono de cada tipo (los que agregan los usuarios usan el del tubo de ensayo). */
 const ICONOS_TIPO: Record<string, string> = {
   'agua-microbiologico': '🦠',
   'agua-fisicoquimico': '💧',
@@ -87,6 +93,9 @@ export class CategoriaComponent implements OnInit {
   readonly describirAviso = describirAviso;
   readonly maximoDiasAviso = MAXIMO_DIAS_AVISO;
   readonly maximoAvisar = MAXIMO_AVISAR;
+  readonly largoMaximoTipo = LARGO_MAXIMO_TIPO;
+  readonly aceptaArchivos = ACEPTA_ARCHIVOS;
+  readonly tipoDeArchivo = tipoDeArchivo;
 
   categoria: Categoria | null = null;
   tipo = '';
@@ -120,8 +129,15 @@ export class CategoriaComponent implements OnInit {
   mensajeExito = '';
   errorSubida = '';
 
+  // Agregar un tipo de análisis
+  agregandoTipo = false;
+  nombreNuevoTipo = '';
+  errorTipo = '';
+  guardandoTipo = false;
+
   // Eliminación (confirmación en la misma fila, RF-07)
   confirmando: string | null = null;
+  descargando: string | null = null; // id del archivo que se está descargando
   eliminando: string | null = null;
   errorEliminar = '';
 
@@ -178,11 +194,62 @@ export class CategoriaComponent implements OnInit {
   }
 
   iconoTipo(id: string): string {
-    return ICONOS_TIPO[id] ?? '📄';
+    return ICONOS_TIPO[id] ?? '🧪';
   }
 
   get nombreTipo(): string {
     return this.categoria?.tipos.find((t) => t.id === this.tipo)?.nombre ?? '';
+  }
+
+  // ── Agregar tipo de análisis ─────────────────────────────────────────
+
+  abrirNuevoTipo(): void {
+    this.agregandoTipo = true;
+    this.nombreNuevoTipo = '';
+    this.errorTipo = '';
+  }
+
+  cerrarNuevoTipo(): void {
+    this.agregandoTipo = false;
+    this.errorTipo = '';
+  }
+
+  /** Si el nombre ya existe (sin contar mayúsculas, acentos ni signos), devuelve el que existe. */
+  get tipoRepetido(): string {
+    const id = idDeNombre(this.nombreNuevoTipo);
+    return (id && this.categoria?.tipos.find((t) => t.id === id)?.nombre) || '';
+  }
+
+  guardarNuevoTipo(): void {
+    if (!this.categoria || this.guardandoTipo) return;
+    const nombre = this.nombreNuevoTipo.trim().replace(/\s+/g, ' ');
+    if (!idDeNombre(nombre)) {
+      this.errorTipo = 'Escribí el nombre del tipo de análisis.';
+      return;
+    }
+    if (this.tipoRepetido) {
+      this.errorTipo = `Ya existe un tipo de análisis llamado "${this.tipoRepetido}".`;
+      return;
+    }
+    const categoria = this.categoria;
+    this.guardandoTipo = true;
+    this.errorTipo = '';
+    this.documentos.agregarTipo(categoria.id, nombre).subscribe({
+      next: (tipo) => {
+        this.guardandoTipo = false;
+        this.agregandoTipo = false;
+        // Se suma a la lista guardada de categorías, así la tarjeta aparece sin recargar
+        if (!categoria.tipos.some((t) => t.id === tipo.id)) categoria.tipos.push(tipo);
+        // Se pasa a la tarjeta nueva; el mensaje va después porque al cambiar de tipo se borran
+        this.router
+          .navigate([], { relativeTo: this.route, queryParams: { tipo: tipo.id }, replaceUrl: true })
+          .then(() => (this.mensajeExito = `Se agregó el tipo de análisis "${tipo.nombre}".`));
+      },
+      error: (err) => {
+        this.guardandoTipo = false;
+        this.errorTipo = describirError(err, 'No se pudo agregar el tipo de análisis.');
+      },
+    });
   }
 
   // ── Búsqueda ─────────────────────────────────────────────────────────
@@ -317,10 +384,9 @@ export class CategoriaComponent implements OnInit {
     this.archivo = null;
     if (!archivo) return;
 
-    // RF-08: solo PDF (el servidor lo vuelve a controlar)
-    const esPdf = archivo.type === 'application/pdf' || archivo.name.toLowerCase().endsWith('.pdf');
-    if (!esPdf) {
-      this.errorSubida = 'Solo se aceptan archivos PDF.';
+    // RF-08: PDF, Word o Excel (el servidor lo vuelve a controlar)
+    if (!extensionDe(archivo.name)) {
+      this.errorSubida = 'Solo se aceptan archivos PDF, Word (.doc, .docx) o Excel (.xls, .xlsx).';
       this.reiniciarSelector();
       return;
     }
@@ -331,13 +397,13 @@ export class CategoriaComponent implements OnInit {
     }
     this.archivo = archivo;
     // Se propone el nombre del archivo; se puede cambiar antes de subir
-    if (!this.datos.nombre) this.datos.nombre = archivo.name.replace(/\.pdf$/i, '');
+    if (!this.datos.nombre) this.datos.nombre = sinExtension(archivo.name);
   }
 
   /** Qué falta para poder subir (null = está todo). */
   get faltante(): string | null {
     const d = this.datos;
-    if (!this.editando && !this.archivo) return 'Elegí el archivo PDF.';
+    if (!this.editando && !this.archivo) return 'Elegí el archivo.';
     if (!d.area.trim()) return 'Completá el área.';
     if (!d.fechaRealizacion) return 'Completá la fecha de realización.';
     if (!d.responsable.trim()) return 'Completá el responsable.';
@@ -444,7 +510,7 @@ export class CategoriaComponent implements OnInit {
     this.editando = doc;
     this.formularioAbierto = true;
     this.datos = {
-      nombre: doc.nombre.replace(/\.pdf$/i, ''),
+      nombre: sinExtension(doc.nombre),
       area: doc.area ?? '',
       fechaRealizacion: doc.fechaRealizacion ?? '',
       fechaVencimiento: doc.fechaVencimiento ?? '',
@@ -493,7 +559,48 @@ export class CategoriaComponent implements OnInit {
     this.confirmando = null;
   }
 
-  // ── Ver y eliminar ───────────────────────────────────────────────────
+  // ── Ver, descargar y eliminar ────────────────────────────────────────
+
+  /** "ana@empresa.com" → ["ana", "@empresa.com"] (para cortar la línea en la @). */
+  partesMail(mail: string): [string, string] {
+    const i = mail.indexOf('@');
+    return i > 0 ? [mail.slice(0, i), mail.slice(i)] : [mail, ''];
+  }
+
+  /** 📄 PDF, 📝 Word, 📊 Excel (para el archivo elegido antes de subirlo). */
+  iconoArchivo(nombre: string): string {
+    const clase = tipoDeArchivo(extensionDe(nombre) ?? 'pdf').clase;
+    return clase === 'word' ? '📝' : clase === 'excel' ? '📊' : '📄';
+  }
+
+  /** Solo los PDF se pueden ver en el navegador; Word y Excel se descargan. */
+  abrir(doc: Documento): void {
+    if (doc.formato === 'pdf') this.ver(doc);
+    else this.descargar(doc);
+  }
+
+  /** Guarda el archivo en la compu (en Descargas), con su nombre. */
+  descargar(doc: Documento): void {
+    this.limpiarMensajes();
+    this.descargando = doc.id;
+    this.documentos.archivo(doc.id, true).subscribe({
+      next: (blob) => {
+        this.descargando = null;
+        const url = URL.createObjectURL(blob);
+        const enlace = document.createElement('a');
+        enlace.href = url;
+        enlace.download = doc.nombre;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      },
+      error: () => {
+        this.descargando = null;
+        this.errorEliminar = `No se pudo descargar "${doc.nombre}".`;
+      },
+    });
+  }
 
   /** Abre el PDF en una pestaña nueva. La pestaña se abre ANTES de pedirlo para que Safari no la bloquee. */
   ver(doc: Documento): void {

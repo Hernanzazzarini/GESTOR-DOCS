@@ -1,13 +1,14 @@
 import { Readable } from 'node:stream';
+import { MIMES, formatoPorMime } from '../config/formatos.js';
 import { ES_ANIO, crearServicioCarpetas } from './carpetas.js';
 import { ErrorHttp, esNoEncontrado } from './errores.js';
 import { aPropiedades, desdePropiedades } from './datos-documento.js';
 
-const PDF = 'application/pdf';
-const CAMPOS_DOC = 'id, name, size, createdTime, properties, appProperties';
+const CAMPOS_DOC = 'id, name, mimeType, size, createdTime, properties, appProperties';
+// PDF, Word o Excel (config/formatos.js)
+const CONSULTA_FORMATOS = `(${MIMES.map((m) => `mimeType = '${m}'`).join(' or ')})`;
 
-export function crearServicioDocumentos(drive, rootFolderId) {
-  const carpetas = crearServicioCarpetas(drive);
+export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearServicioCarpetas(drive)) {
 
   /** Reintenta una vez si Drive dice 404 (una carpeta guardada en memoria ya no existe). */
   async function conReintento(fn) {
@@ -26,6 +27,7 @@ export function crearServicioDocumentos(drive, rootFolderId) {
     return {
       id: f.id,
       nombre: f.name,
+      formato: formatoPorMime(f.mimeType)?.extension ?? 'pdf', // "pdf", "docx", "xlsx"…
       tamanio: Number(f.size ?? 0),
       fecha: f.createdTime,
       ...desdePropiedades(f),
@@ -57,9 +59,9 @@ export function crearServicioDocumentos(drive, rootFolderId) {
       const { data: archivo } = await drive.files.get({
         fileId: id,
         supportsAllDrives: true,
-        fields: `${CAMPOS_DOC}, mimeType, trashed, parents`,
+        fields: `${CAMPOS_DOC}, trashed, parents`,
       });
-      if (archivo.trashed || archivo.mimeType !== PDF) throw new ErrorHttp(404, 'El documento no existe.');
+      if (archivo.trashed || !MIMES.includes(archivo.mimeType)) throw new ErrorHttp(404, 'El documento no existe.');
 
       const padre = await carpeta(archivo.parents?.[0]);
       const abuelo = await carpeta(padre.parents?.[0]);
@@ -88,7 +90,7 @@ export function crearServicioDocumentos(drive, rootFolderId) {
           supportsAllDrives: true,
           includeItemsFromAllDrives: true,
           corpora: 'allDrives',
-          q: `(${padres.map((id) => `'${id}' in parents`).join(' or ')}) and mimeType = '${PDF}' and trashed = false`,
+          q: `(${padres.map((id) => `'${id}' in parents`).join(' or ')}) and ${CONSULTA_FORMATOS} and trashed = false`,
           fields: `files(${CAMPOS_DOC})`,
           orderBy: 'createdTime desc',
           pageSize: 1000,
@@ -97,7 +99,7 @@ export function crearServicioDocumentos(drive, rootFolderId) {
       });
     },
 
-    async subir(categoria, tipo, { nombre, contenido, datos }, email) {
+    async subir(categoria, tipo, { nombre, contenido, mime, datos }, email) {
       const properties = { subidoPor: email ?? '' };
       for (const [clave, valor] of Object.entries(aPropiedades(datos))) {
         if (valor !== null) properties[clave] = valor;
@@ -109,11 +111,11 @@ export function crearServicioDocumentos(drive, rootFolderId) {
           supportsAllDrives: true,
           requestBody: {
             name: nombre,
-            mimeType: PDF,
+            mimeType: mime, // el mismo que el archivo: así Drive no lo convierte
             parents: [carpetaId],
             properties,
           },
-          media: { mimeType: PDF, body: Readable.from(contenido) },
+          media: { mimeType: mime, body: Readable.from(contenido) },
           fields: CAMPOS_DOC,
         });
         return aDocumento(res.data);
@@ -142,14 +144,14 @@ export function crearServicioDocumentos(drive, rootFolderId) {
       });
     },
 
-    /** Devuelve { nombre, flujo } para mandar el PDF al navegador. */
+    /** Devuelve { nombre, mime, flujo } para mandar el archivo al navegador. */
     async descargar(id) {
       const { archivo } = await verificarUbicacion(id);
       const res = await drive.files.get(
         { fileId: id, alt: 'media', supportsAllDrives: true },
         { responseType: 'stream' },
       );
-      return { nombre: archivo.name, flujo: res.data };
+      return { nombre: archivo.name, mime: archivo.mimeType, flujo: res.data };
     },
 
     /**

@@ -9,6 +9,10 @@ import {
   formatearFecha,
   formatearTamanio,
   hoyIso,
+  extensionDe,
+  idDeNombre,
+  sinExtension,
+  tipoDeArchivo,
 } from './documentos';
 
 describe('documentos (ayudas)', () => {
@@ -32,6 +36,7 @@ describe('documentos (fechas y filtros)', () => {
   const doc = (datos: Partial<Documento>): Documento => ({
     id: 'x',
     nombre: 'Análisis.pdf',
+    formato: 'pdf',
     tamanio: 1,
     fecha: '2026-01-01T12:00:00Z',
     subidoPor: null,
@@ -82,5 +87,34 @@ describe('documentos (avisos)', () => {
     expect(describirAviso(0)).toBe('El día que vence');
     expect(describirAviso(1)).toBe('1 día antes');
     expect(describirAviso(30)).toBe('30 días antes');
+  });
+});
+
+describe('idDeNombre (para no repetir tipos de análisis)', () => {
+  it('ignora mayúsculas, acentos, espacios y signos', () => {
+    expect(idDeNombre('Agua - Microbiológico')).toBe('agua-microbiologico');
+    expect(idDeNombre('  ALÉRGENOS ')).toBe('alergenos');
+    expect(idDeNombre('metales   pesados')).toBe(idDeNombre('Metales-Pesados'));
+    expect(idDeNombre('---')).toBe('');
+  });
+});
+
+describe('formatos de archivo (PDF, Word, Excel)', () => {
+  it('reconoce las extensiones permitidas sin importar mayúsculas', () => {
+    expect(extensionDe('Informe.DOCX')).toBe('docx');
+    expect(extensionDe('planilla.xls')).toBe('xls');
+    expect(extensionDe('foto.png')).toBeNull();
+    expect(extensionDe('sin extension')).toBeNull();
+  });
+
+  it('saca solo la extensión permitida del nombre', () => {
+    expect(sinExtension('Control v1.2.xlsx')).toBe('Control v1.2');
+    expect(sinExtension('Lote 1.5')).toBe('Lote 1.5');
+  });
+
+  it('elige el ícono según el formato', () => {
+    expect(tipoDeArchivo('doc')).toEqual({ etiqueta: 'DOC', clase: 'word' });
+    expect(tipoDeArchivo('xlsx')).toEqual({ etiqueta: 'XLS', clase: 'excel' });
+    expect(tipoDeArchivo('pdf')).toEqual({ etiqueta: 'PDF', clase: 'pdf' });
   });
 });

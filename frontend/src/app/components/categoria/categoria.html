@@ -48,7 +48,52 @@
             <span class="tipo-nombre">{{ t.nombre }}</span>
           </button>
         }
+        @if (!agregandoTipo) {
+          <button
+            type="button"
+            class="tipo tipo-agregar"
+            [disabled]="progreso !== null"
+            (click)="abrirNuevoTipo()"
+          >
+            <span class="tipo-icono" aria-hidden="true">＋</span>
+            <span class="tipo-nombre">Agregar tipo</span>
+          </button>
+        }
       </nav>
+
+      <!-- Agregar un tipo de análisis (no se puede repetir el nombre) -->
+      @if (agregandoTipo) {
+        <form class="card nuevo-tipo" (ngSubmit)="guardarNuevoTipo()">
+          <label for="nuevo-tipo">Nombre del nuevo tipo de análisis</label>
+          <div class="nuevo-tipo-fila">
+            <input
+              id="nuevo-tipo"
+              name="nuevoTipo"
+              type="text"
+              placeholder="Ej.: Metales pesados"
+              autocomplete="off"
+              [maxlength]="largoMaximoTipo"
+              [(ngModel)]="nombreNuevoTipo"
+              (ngModelChange)="errorTipo = ''"
+              [disabled]="guardandoTipo"
+              autofocus
+            />
+            <button type="submit" class="btn-primary" [disabled]="guardandoTipo || !!tipoRepetido">
+              {{ guardandoTipo ? 'Agregando…' : 'Agregar' }}
+            </button>
+            <button type="button" class="btn-secundario" [disabled]="guardandoTipo" (click)="cerrarNuevoTipo()">
+              Cancelar
+            </button>
+          </div>
+          @if (errorTipo) {
+            <p class="nuevo-tipo-error" role="alert">{{ errorTipo }}</p>
+          } @else if (tipoRepetido) {
+            <p class="nuevo-tipo-error" role="alert">Ya existe un tipo de análisis llamado "{{ tipoRepetido }}".</p>
+          } @else {
+            <p class="nuevo-tipo-ayuda">Aparece como una tarjeta más y se crea su carpeta en Drive.</p>
+          }
+        </form>
+      }
 
       @if (mensajeExito && !formularioAbierto) {
         <div class="alert success-alert">{{ mensajeExito }}</div>
@@ -61,7 +106,7 @@
             <div>
               @if (editando) {
                 <h3>Editar documento</h3>
-                <p class="nota">Cambiás los datos de "{{ editando.nombre }}". El PDF queda igual.</p>
+                <p class="nota">Cambiás los datos de "{{ editando.nombre }}". El archivo queda igual.</p>
               } @else {
                 <h3>Subir documento a {{ nombreTipo }}</h3>
                 <p class="nota ruta">
@@ -79,10 +124,10 @@
               <div class="paso">
                 <span class="paso-numero">1</span>
                 <div class="paso-cuerpo">
-                  <span class="paso-titulo">Archivo PDF</span>
+                  <span class="paso-titulo">Archivo (PDF, Word o Excel)</span>
                   @if (archivo) {
                     <div class="archivo-elegido">
-                      <span class="archivo-icono" aria-hidden="true">📄</span>
+                      <span class="archivo-icono" aria-hidden="true">{{ iconoArchivo(archivo.name) }}</span>
                       <div class="archivo-info">
                         <b>{{ archivo.name }}</b>
                         <small class="nota">{{ formatearTamanio(archivo.size) }}</small>
@@ -97,10 +142,10 @@
                       (dragleave)="alArrastrar($event, false)"
                       (drop)="alSoltar($event)"
                     >
-                      <input #selectorArchivo type="file" accept="application/pdf,.pdf" (change)="elegirArchivo($event)" />
+                      <input #selectorArchivo type="file" [accept]="aceptaArchivos" (change)="elegirArchivo($event)" />
                       <span class="zona-icono" aria-hidden="true">⬆</span>
-                      <span><b>Arrastrá el PDF acá</b> o hacé clic para elegirlo</span>
-                      <small class="nota">Solo PDF, hasta 20 MB</small>
+                      <span><b>Arrastrá el archivo acá</b> o hacé clic para elegirlo</span>
+                      <small class="nota">PDF, Word (.doc, .docx) o Excel (.xls, .xlsx), hasta 20 MB</small>
                     </label>
                   }
                 </div>
@@ -115,7 +160,7 @@
                 <div class="grilla-campos">
                   <div class="campo campo-ancho">
                     <label for="nombre">Nombre del archivo</label>
-                    <input id="nombre" type="text" maxlength="150" [(ngModel)]="datos.nombre" placeholder="Se usa el nombre del PDF" />
+                    <input id="nombre" type="text" maxlength="150" [(ngModel)]="datos.nombre" placeholder="Se usa el nombre del archivo" />
                   </div>
 
                   <div class="campo">
@@ -378,8 +423,15 @@
                   @for (d of docsFiltrados; track d.id) {
                     <tr [class.fila-editando]="editando?.id === d.id">
                       <td class="celda-nombre">
-                        <button type="button" class="doc" (click)="ver(d)" title="Abrir el PDF">
-                          <span class="doc-icono" aria-hidden="true">PDF</span>
+                        <button
+                          type="button"
+                          class="doc"
+                          (click)="abrir(d)"
+                          [title]="d.formato === 'pdf' ? 'Abrir el PDF' : 'Descargar el archivo'"
+                        >
+                          <span [class]="'doc-icono doc-' + tipoDeArchivo(d.formato).clase" aria-hidden="true">
+                            {{ tipoDeArchivo(d.formato).etiqueta }}
+                          </span>
                           <span class="doc-texto">
                             <span class="doc-nombre">{{ d.nombre }}</span>
                             <small class="nota">
@@ -407,7 +459,14 @@
                           <span class="nota">No vence</span>
                         }
                       </td>
-                      <td class="celda-autor">{{ d.responsable || '—' }}</td>
+                      <td class="celda-autor">
+                        @if (d.responsable) {
+                          <!-- El mail se corta en la @ (no en cualquier letra) si no entra -->
+                          {{ partesMail(d.responsable)[0] }}<wbr />{{ partesMail(d.responsable)[1] }}
+                        } @else {
+                          —
+                        }
+                      </td>
                       <td class="acciones">
                         @if (confirmando === d.id) {
                           <span class="confirmar">
@@ -420,13 +479,21 @@
                             </button>
                           </span>
                         } @else {
-                          <button type="button" class="accion" (click)="ver(d)">Ver</button>
-                          @if (puedeEditar(d)) {
-                            <button type="button" class="accion" (click)="editar(d)">Editar</button>
-                          }
-                          @if (puedeEliminar) {
-                            <button type="button" class="accion accion-peligro" (click)="pedirConfirmacion(d)">Eliminar</button>
-                          }
+                          <!-- En dos filas de dos botones: así la tabla entra sin barra horizontal -->
+                          <div class="acciones-grupo">
+                            @if (d.formato === 'pdf') {
+                              <button type="button" class="accion" (click)="ver(d)">Ver</button>
+                            }
+                            <button type="button" class="accion" (click)="descargar(d)" [disabled]="descargando === d.id">
+                              {{ descargando === d.id ? 'Bajando…' : 'Descargar' }}
+                            </button>
+                            @if (puedeEditar(d)) {
+                              <button type="button" class="accion" (click)="editar(d)">Editar</button>
+                            }
+                            @if (puedeEliminar) {
+                              <button type="button" class="accion accion-peligro" (click)="pedirConfirmacion(d)">Eliminar</button>
+                            }
+                          </div>
                         }
                       </td>
                     </tr>

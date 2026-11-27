@@ -1,6 +1,7 @@
+import { extensionDe } from '../config/formatos.js';
 import { ErrorHttp } from './errores.js';
 
-// Datos que acompañan a cada PDF: área, fechas, responsable y avisos de vencimiento.
+// Datos que acompañan a cada archivo: área, fechas, responsable y avisos de vencimiento.
 //
 // Se guardan en el mismo archivo de Drive como "properties" (públicas, no "appProperties"):
 // así también los puede leer el script de Google que manda los avisos y arma la planilla
@@ -80,8 +81,11 @@ export function validarDatos(body, nombreOriginal) {
     throw new ErrorHttp(400, 'La fecha de vencimiento no puede ser anterior a la de realización.');
   }
 
-  // Si no escriben un nombre, queda el del archivo. Siempre termina en .pdf
-  const base = limpiar(body?.nombre).replace(/\.pdf$/i, '') || limpiar(nombreOriginal).replace(/\.pdf$/i, '');
+  // Si no escriben un nombre, queda el del archivo. Siempre termina con la extensión del archivo
+  // original (.pdf, .docx, .xlsx…): al editar, nombreOriginal es el nombre que ya tiene.
+  const extension = extensionDe(nombreOriginal) ?? 'pdf';
+  const sinExtension = (texto) => limpiar(texto).replace(new RegExp(`\\.${extension}$`, 'i'), '');
+  const base = sinExtension(body?.nombre) || sinExtension(nombreOriginal);
   if (!base) throw new ErrorHttp(400, 'Falta completar el nombre.');
   if (base.length > 150) throw new ErrorHttp(400, 'El nombre puede tener hasta 150 caracteres.');
 
@@ -111,7 +115,7 @@ export function validarDatos(body, nombreOriginal) {
   }
 
   return {
-    nombre: `${base}.pdf`,
+    nombre: `${base}.${extension}`,
     datos: {
       area: textoObligatorio(body?.area, 'el área', 60),
       fechaRealizacion,

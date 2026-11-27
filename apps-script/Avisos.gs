@@ -3,7 +3,7 @@
  *
  * Vive dentro de la planilla "Registro de documentos" (en la carpeta Documentos generales).
  * Cada hora actualiza la planilla (pasos 1 y 2). Todos los días a la mañana, además, manda los avisos:
- *   1. Recorre Documentos generales / Categoría / Tipo y lee los datos de cada PDF
+ *   1. Recorre Documentos generales / Categoría / Tipo y lee los datos de cada archivo (PDF, Word, Excel)
  *      (los guarda la app en las "properties" del archivo de Drive).
  *   2. Reescribe la hoja "Documentos" con una fila por documento.
  *   3. Manda un mail al responsable (y a los que figuran en "avisar a") de cada documento
@@ -22,7 +22,14 @@ const CONFIG = {
 };
 
 const CARPETA = 'application/vnd.google-apps.folder';
-const PDF = 'application/pdf';
+// Los mismos formatos que acepta la app (backend/src/config/formatos.js)
+const FORMATOS = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+];
 
 // ── Menú y tarea diaria ───────────────────────────────────────────────────
 
@@ -93,9 +100,15 @@ function hijos(carpetaId, mimeType, campos) {
   return listarTodo(`'${carpetaId}' in parents and mimeType = '${mimeType}' and trashed = false`, campos);
 }
 
+/** Los documentos (PDF, Word o Excel) que hay en una carpeta. */
+function documentosEn(carpetaId, campos) {
+  const formatos = FORMATOS.map((m) => `mimeType = '${m}'`).join(' or ');
+  return listarTodo(`'${carpetaId}' in parents and (${formatos}) and trashed = false`, campos);
+}
+
 /**
- * Documentos generales / Categoría / Tipo / Año / *.pdf → lista de documentos con sus datos.
- * También lee los PDF sueltos en el Tipo (como se guardaban antes de separar por año).
+ * Documentos generales / Categoría / Tipo / Año / archivos → lista de documentos con sus datos.
+ * También lee los archivos sueltos en el Tipo (como se guardaban antes de separar por año).
  */
 function leerDocumentos() {
   const docs = [];
@@ -104,7 +117,7 @@ function leerDocumentos() {
     for (const tipo of hijos(categoria.id, CARPETA, 'id, name')) {
       const anios = hijos(tipo.id, CARPETA, 'id, name').filter((c) => /^\d{4}$/.test(c.name));
       for (const carpeta of [tipo, ...anios]) {
-        for (const f of hijos(carpeta.id, PDF, campos)) docs.push(aDocumento(f, categoria.name, tipo.name));
+        for (const f of documentosEn(carpeta.id, campos)) docs.push(aDocumento(f, categoria.name, tipo.name));
       }
     }
   }
@@ -258,7 +271,7 @@ function cuerpoAviso(doc, faltan) {
     fila('Vencimiento', formatearFecha(doc.fechaVencimiento)) +
     fila('Responsable', doc.responsable) +
     '</table>' +
-    `<p><a href="${doc.link}">Abrir el PDF en Drive</a> · <a href="${CONFIG.URL_APP}">Abrir el gestor de documentación</a></p>` +
+    `<p><a href="${doc.link}">Abrir el archivo en Drive</a> · <a href="${CONFIG.URL_APP}">Abrir el gestor de documentación</a></p>` +
     '<p style="color:#64748b;font-size:12px">Aviso automático del gestor de documentación. ' +
     'Para cambiar cuándo y a quién se avisa, editá el documento en el gestor.</p>'
   );

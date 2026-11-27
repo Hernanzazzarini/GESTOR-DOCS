@@ -40,6 +40,17 @@ export function crearServicioCarpetas(drive) {
     return res.data.id;
   }
 
+  /** Carpetas (no papelera) que hay directamente dentro de "padreId". */
+  async function subcarpetas(padreId) {
+    const res = await drive.files.list({
+      ...OPCIONES_UNIDAD,
+      q: `'${escapar(padreId)}' in parents and mimeType = '${TIPO_CARPETA}' and trashed = false`,
+      fields: 'files(id, name)',
+      pageSize: 1000,
+    });
+    return res.data.files ?? [];
+  }
+
   /** ID de la carpeta "nombre" dentro de "padreId". Si crearSiFalta es false y no existe, devuelve null. */
   async function obtener(padreId, nombre, crearSiFalta) {
     const clave = `${padreId}/${nombre}`;
@@ -72,13 +83,19 @@ export function crearServicioCarpetas(drive) {
 
     /** Carpetas de año que hay dentro de un tipo. */
     async carpetasAnio(tipoId) {
-      const res = await drive.files.list({
-        ...OPCIONES_UNIDAD,
-        q: `'${escapar(tipoId)}' in parents and mimeType = '${TIPO_CARPETA}' and trashed = false`,
-        fields: 'files(id, name)',
-        pageSize: 1000,
-      });
-      return (res.data.files ?? []).filter((f) => ES_ANIO.test(f.name)).map((f) => f.id);
+      return (await subcarpetas(tipoId)).filter((f) => ES_ANIO.test(f.name)).map((f) => f.id);
+    },
+
+    /** Nombres de las carpetas de tipo que hay dentro de una categoría (sin crear nada). */
+    async nombresTipos(rootId, categoria) {
+      const catId = await obtener(rootId, categoria.nombre, false);
+      return catId ? (await subcarpetas(catId)).map((f) => f.name) : [];
+    },
+
+    /** Crea (si falta) la carpeta Documentos generales / Categoría / Tipo. */
+    async crearCarpetaTipo(rootId, categoria, nombreTipo) {
+      const catId = await obtener(rootId, categoria.nombre, true);
+      return obtener(catId, nombreTipo, true);
     },
 
     /** Igual que carpetaDestino pero sin crear nada (para listar). null si todavía no existe. */

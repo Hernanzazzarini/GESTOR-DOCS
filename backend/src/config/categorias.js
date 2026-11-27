@@ -5,6 +5,9 @@
 // - id:     va en la URL (/documentos/analisis). Minúsculas, sin espacios ni acentos.
 // - nombre: es el nombre de la carpeta en Drive y el texto que ve el usuario.
 //
+// Además, los usuarios pueden agregar tipos desde la pantalla (servicios/tipos.js): cada uno es
+// una carpeta más dentro de la categoría en Drive. Los de acá son los fijos.
+//
 // Si cambiás el "nombre" de algo que ya tiene archivos, se crea una carpeta nueva:
 // renombrá también la carpeta vieja en Drive para no perder los documentos.
 
@@ -31,10 +34,3 @@ export const CATEGORIAS = [
   //   ],
   // },
 ];
-
-/** Devuelve { categoria, tipo } o null si la combinación no existe. */
-export function buscarCategoriaYTipo(categoriaId, tipoId) {
-  const categoria = CATEGORIAS.find((c) => c.id === categoriaId);
-  const tipo = categoria?.tipos.find((t) => t.id === tipoId);
-  return categoria && tipo ? { categoria, tipo } : null;
-}

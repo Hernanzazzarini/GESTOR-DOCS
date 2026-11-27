@@ -8,6 +8,10 @@ import { crearApp } from '../src/app.js';
 const ROOT = 'root-documentos-generales';
 const CARPETA = 'application/vnd.google-apps.folder';
 const PDF_VALIDO = Buffer.from('%PDF-1.4\n%prueba\n');
+const ZIP = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]); // así empiezan .docx y .xlsx
+const OLE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00]); // .doc y .xls
+const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /** Drive en memoria: guarda archivos y cuenta cuántas carpetas se crearon. */
 function crearDriveFalso() {
@@ -25,9 +29,9 @@ function crearDriveFalso() {
         await espera();
         const padres = [...q.matchAll(/'([^']+)' in parents/g)].map((m) => m[1]);
         const nombre = q.match(/name = '((?:[^'\\]|\\.)*)'/)?.[1]?.replace(/\\(.)/g, '$1');
-        const tipo = q.match(/mimeType = '([^']+)'/)[1];
+        const tipos = [...q.matchAll(/mimeType = '([^']+)'/g)].map((m) => m[1]);
         const files = [...archivos.values()].filter(
-          (f) => padres.includes(f.parents[0]) && f.mimeType === tipo && !f.trashed && (!nombre || f.name === nombre),
+          (f) => padres.includes(f.parents[0]) && tipos.includes(f.mimeType) && !f.trashed && (!nombre || f.name === nombre),
         );
         return { data: { files } };
       },
@@ -289,15 +293,98 @@ describe('API gestor de documentación', () => {
     assert.equal(drive.archivos.get(archivo.parents[0]).name, '2024');
   });
 
+  it('agrega un tipo de análisis nuevo: aparece en las categorías y se le pueden subir PDFs', async () => {
+    const r = await request(app)
+      .post('/api/categorias/analisis/tipos')
+      .set(como('token-operador'))
+      .send({ nombre: '  Metales   pesados ' })
+      .expect(201);
+    assert.deepEqual(r.body, { id: 'metales-pesados', nombre: 'Metales pesados', agregado: true });
+
+    const cats = await request(app).get('/api/categorias').set(como('token-operador')).expect(200);
+    const ids = cats.body.categorias[0].tipos.map((t) => t.id);
+    assert.deepEqual(ids, ['agua-microbiologico', 'agua-fisicoquimico', 'alergenos', 'aflatoxinas', 'metales-pesados']);
+
+    await subir(app, 'token-operador', { tipo: 'metales-pesados' }).expect(201);
+    const lista = await request(app)
+      .get('/api/documentos?categoria=analisis&tipo=metales-pesados')
+      .set(como('token-operador'))
+      .expect(200);
+    assert.equal(lista.body.length, 1);
+    const carpetaTipo = [...drive.archivos.values()].find((f) => f.name === 'Metales pesados');
+    assert.ok(carpetaTipo, 'se creó la carpeta del tipo en Drive');
+  });
+
+  it('no deja repetir el nombre de un tipo (sin importar mayúsculas, acentos ni signos)', async () => {
+    const agregar = (nombre) =>
+      request(app).post('/api/categorias/analisis/tipos').set(como('token-operador')).send({ nombre });
+    const fijo = await agregar('ALERGENOS').expect(409);
+    assert.match(fijo.body.mensaje, /Ya existe un tipo de análisis llamado "Alérgenos"/);
+    await agregar('agua microbiologico').expect(409);
+    await agregar('Metales pesados').expect(201);
+    await agregar('metales-PESADOS').expect(409);
+  });
+
+  it('rechaza nombres de tipo vacíos, muy largos o con signos raros', async () => {
+    const agregar = (nombre) =>
+      request(app).post('/api/categorias/analisis/tipos').set(como('token-operador')).send({ nombre });
+    await agregar('   ').expect(400);
+    await agregar('x'.repeat(61)).expect(400);
+    await agregar('Agua/Pozo').expect(400);
+    await agregar('---').expect(400);
+    await request(app).post('/api/categorias/inventada/tipos').set(como('token-operador')).send({ nombre: 'Algo' }).expect(404);
+  });
+
   it('5 subidas a la vez crean cada carpeta una sola vez', async () => {
     await Promise.all(Array.from({ length: 5 }, () => subir(app, 'token-operador').expect(201)));
     assert.equal(drive.carpetasCreadas, 3); // Análisis + Aflatoxinas + 2026
   });
 
-  it('rechaza archivos que no son PDF aunque digan serlo', async () => {
-    await subir(app, 'token-operador', { mime: 'image/png', nombre: 'foto.png' }).expect(400);
+  it('rechaza archivos que no son PDF, Word ni Excel, o que no son lo que dicen ser', async () => {
+    const png = await subir(app, 'token-operador', { mime: 'image/png', nombre: 'foto.png' }).expect(400);
+    assert.match(png.body.mensaje, /PDF, Word .* o Excel/);
     const falso = await subir(app, 'token-operador', { contenido: Buffer.from('no soy un pdf') }).expect(400);
-    assert.match(falso.body.mensaje, /PDF/);
+    assert.match(falso.body.mensaje, /no es un \.pdf válido/);
+    // Un PDF con nombre de Excel, o un .doc viejo disfrazado de .docx
+    await subir(app, 'token-operador', { nombre: 'planilla.xlsx', mime: XLSX }).expect(400);
+    await subir(app, 'token-operador', { nombre: 'informe.docx', mime: DOCX, contenido: OLE }).expect(400);
+  });
+
+  it('sube Word y Excel (nuevos y viejos) sin convertirlos y los lista con su formato', async () => {
+    const casos = [
+      ['Informe.docx', ZIP, DOCX, 'docx'],
+      ['Informe viejo.DOC', OLE, 'application/msword', 'doc'],
+      ['Resultados.xlsx', ZIP, XLSX, 'xlsx'],
+      ['Resultados viejos.xls', OLE, 'application/vnd.ms-excel', 'xls'],
+    ];
+    for (const [nombre, contenido, mime, formato] of casos) {
+      // Safari a veces manda "application/octet-stream": vale la extensión + la firma
+      const { body } = await subir(app, 'token-operador', {
+        nombre,
+        contenido,
+        mime: 'application/octet-stream',
+        datos: { ...DATOS, nombre: '' },
+      }).expect(201);
+      assert.equal(body.formato, formato);
+      assert.equal(body.nombre, nombre.replace(/\.[^.]+$/, `.${formato}`));
+      assert.equal(drive.archivos.get(body.id).mimeType, mime);
+    }
+    await subir(app, 'token-operador').expect(201);
+    const lista = await request(app)
+      .get('/api/documentos?categoria=analisis&tipo=aflatoxinas')
+      .set(como('token-operador'))
+      .expect(200);
+    assert.deepEqual(lista.body.map((d) => d.formato).sort(), ['doc', 'docx', 'pdf', 'xls', 'xlsx']);
+  });
+
+  it('al editar un Excel, el nombre sigue terminando en .xlsx', async () => {
+    const { body: doc } = await subir(app, 'token-operador', { nombre: 'a.xlsx', contenido: ZIP, mime: XLSX }).expect(201);
+    const { body } = await request(app)
+      .patch(`/api/documentos/${doc.id}`)
+      .set(como('token-operador'))
+      .send({ ...DATOS, nombre: 'Planilla de control' })
+      .expect(200);
+    assert.equal(body.nombre, 'Planilla de control.xlsx');
   });
 
   it('rechaza archivos de más de 20 MB', async () => {
@@ -334,6 +421,21 @@ describe('API gestor de documentación', () => {
     const res = await request(app).get(`/api/documentos/${doc.id}/archivo`).set(como('token-operador')).expect(200);
     assert.equal(res.headers['content-type'], 'application/pdf');
     assert.match(res.headers['content-disposition'], /inline/);
+  });
+
+  it('descarga el archivo (Word o Excel) con su tipo y su nombre', async () => {
+    const { body: doc } = await subir(app, 'token-operador', {
+      nombre: 'Control de agua.xlsx',
+      contenido: ZIP,
+      mime: XLSX,
+      datos: { ...DATOS, nombre: '' },
+    }).expect(201);
+    const res = await request(app)
+      .get(`/api/documentos/${doc.id}/archivo?descargar=1`)
+      .set(como('token-operador'))
+      .expect(200);
+    assert.equal(res.headers['content-type'], XLSX);
+    assert.equal(res.headers['content-disposition'], "attachment; filename*=UTF-8''Control%20de%20agua.xlsx");
   });
 
   it('si borran una carpeta a mano en Drive, la vuelve a crear', async () => {
