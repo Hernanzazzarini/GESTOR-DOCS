@@ -57,11 +57,14 @@ Layers: `routes/index.js` → `middlewares/` (auth, multer upload) → `controll
 - Uploads: PDF, Word (.doc/.docx) and Excel (.xls/.xlsx), defined in `config/formatos.js` (mirrored as `EXTENSIONES` in frontend `services/documentos.ts` and `FORMATOS` in `Avisos.gs`). Format comes from the filename extension and must match the magic bytes (`%PDF-`, zip, OLE); the browser's MIME is ignored. Stored in Drive with the real MIME (never converted to Google Docs); the saved name keeps the original extension, also on edit. multer memory storage, 20 MB limit, field name `archivo`; filename is re-decoded latin1→UTF-8.
 - `GET /api/documentos/:id/archivo` serves inline ("Ver", PDF only); `?descargar=1` sends `Content-Disposition: attachment` ("Descargar", any format).
 
+### Procedimientos generales
+A second module (`procedimientos`) reusing `CategoriaComponent` via route `/procedimientos` with `data.categoria`. Backend: it is a category in `categorias.js` with `modulo: 'procedimientos'`, `procedimiento: true`, `etiquetaTipo: 'área de uso'`; its tipos are the áreas de uso (users can add more). `GET /api/categorias` only returns categories whose module the user has (`puedeVerCategoria`); routes accept any API module and the controller checks the category's (for existing files, by category folder name via `verificarUbicacion(id, permitir)`). Extra properties: `codigo`, `realizo`, `revision`, `estadoUso` (`en-uso`|`obsoleto`), `copias`, `areasImpresion` (comma list) — validated in `validarDatos(..., { procedimiento, area })`; for procedimientos the server sets `area` to the tipo name. `Avisos.gs` writes them to a separate "Procedimientos" sheet tab (`COLUMNAS_PROCEDIMIENTOS`, detected by category folder name `CONFIG.CATEGORIA_PROCEDIMIENTOS`) and skips alerts for `obsoleto`.
+
 ### Expiry alerts (`apps-script/`)
 Not deployed with the app: `Avisos.gs` is pasted by hand into a Google Sheet's Apps Script (steps in `apps-script/LEEME.md`), runs daily as the installing user, reads the Drive `properties`, rewrites the "Documentos" sheet and emails via `MailApp`. Sent alerts are remembered in Script Properties (`aviso|fileId|vencimiento|dias`). The responsable/avisar pickers read the `users` collection, which needs the `allow list` rule in `frontend/firestore.rules` deployed.
 
 ### Frontend
 - `environments/firebase.ts` holds the (public) Firebase web config; `environment.prod.ts` sets `apiUrl` to the Render URL ending in `/api`.
-- Feature components are lazy-loaded (`loadComponent`); every screen uses `<app-encabezado titulo="...">` as its header.
+- Feature components are lazy-loaded (`loadComponent`); every screen uses `<app-encabezado titulo="...">` as first child of `.pagina`. It renders a fixed sidebar (collapsible to icons, remembered in localStorage; off-canvas with ☰ under 900px) plus a sticky title bar; `styles.css` reserves its width with `.pagina:has(> app-encabezado)` (keep 280px/76px in sync with `encabezado.css`).
 - Locale is `es-AR` (dates/numbers).
 - CORS: backend only accepts origins listed in `ORIGENES_PERMITIDOS`.

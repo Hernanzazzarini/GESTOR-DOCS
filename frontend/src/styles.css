@@ -8,10 +8,28 @@ body {
   background: #f4f6f9;
 }
 
-/* Estructura de página: <div class="pagina"> <app-encabezado> <main class="contenido"> */
+/* Estructura de página: <div class="pagina"> <app-encabezado> <main class="contenido">
+   app-encabezado es el menú lateral (fijo a la izquierda) + la barra con el título:
+   acá se le reserva su lugar. En pantallas chicas el menú se abre con ☰ y no ocupa lugar. */
 .pagina {
   min-height: 100vh;
   background: #f4f6f9;
+}
+
+.pagina:has(> app-encabezado) {
+  padding-left: 280px;
+  transition: padding-left 0.25s ease;
+}
+
+.pagina:has(> app-encabezado .sidebar.colapsada) {
+  padding-left: 76px;
+}
+
+@media (max-width: 900px) {
+  .pagina:has(> app-encabezado),
+  .pagina:has(> app-encabezado .sidebar.colapsada) {
+    padding-left: 0;
+  }
 }
 
 .contenido {

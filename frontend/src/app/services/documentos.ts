@@ -52,8 +52,22 @@ export interface Categoria {
   id: string;
   nombre: string;
   descripcion?: string;
+  modulo?: string; // sin definir: Documentación ("documentos")
+  procedimiento?: boolean; // true: Procedimientos generales (pide código, revisión, copias…)
+  etiquetaTipo?: string; // cómo se le dice a un tipo ("área de uso"); por defecto "tipo de análisis"
   tipos: Tipo[];
 }
+
+/** Estado de un procedimiento. */
+export type EstadoUso = 'en-uso' | 'obsoleto';
+
+export const ETIQUETAS_USO: Record<EstadoUso, string> = {
+  'en-uso': 'En uso',
+  obsoleto: 'Obsoleto',
+};
+
+export const MAXIMO_REVISION = 999; // igual que el back end
+export const MAXIMO_COPIAS = 999;
 
 export interface RespuestaCategorias {
   categorias: Categoria[];
@@ -74,6 +88,13 @@ export interface Documento {
   responsable: string | null; // mail de un usuario registrado
   diasAviso: number[]; // días antes del vencimiento en que se manda el mail (0 = el mismo día)
   avisar: string[]; // mails que reciben el aviso además del responsable
+  // Solo en Procedimientos generales (null o vacío en los demás)
+  codigo?: string | null;
+  realizo?: string | null; // quién realizó el documento
+  revision?: number | null; // Nro de revisión
+  estadoUso?: EstadoUso | null;
+  copias?: number | null; // cantidad de copias impresas
+  areasImpresion?: string[]; // áreas donde están las copias impresas
 }
 
 /** Lo que se carga junto con el archivo (o al editarlo). */
@@ -85,6 +106,13 @@ export interface DatosDocumento {
   responsable: string;
   diasAviso: number[];
   avisar: string[];
+  // Solo en Procedimientos generales (el área es el área de uso: la pone el back end)
+  codigo?: string;
+  realizo?: string;
+  revision?: number | null;
+  estadoUso?: EstadoUso;
+  copias?: number | null;
+  areasImpresion?: string[];
 }
 
 export const DIAS_AVISO_POR_DEFECTO = [30, 7, 0]; // igual que el back end
@@ -101,9 +129,10 @@ export interface Filtros {
   anio: string; // "" = todos
   area: string; // "" = todas
   estado: FiltroEstado; // "" = todos
+  uso: EstadoUso | ''; // procedimientos: "" = en uso y obsoletos
 }
 
-export const FILTROS_VACIOS: Filtros = { texto: '', anio: '', area: '', estado: '' };
+export const FILTROS_VACIOS: Filtros = { texto: '', anio: '', area: '', estado: '', uso: '' };
 
 /** Cuántos días antes del vencimiento un documento pasa a "Por vencer". */
 export const DIAS_AVISO = 30;
@@ -149,7 +178,8 @@ export class DocumentosService {
     formulario.append('categoria', categoria);
     formulario.append('tipo', tipo);
     for (const [clave, valor] of Object.entries(datos)) {
-      formulario.append(clave, Array.isArray(valor) ? valor.join(',') : valor);
+      if (valor === undefined || valor === null) continue;
+      formulario.append(clave, Array.isArray(valor) ? valor.join(',') : String(valor));
     }
     formulario.append('archivo', archivo, archivo.name);
     return this.http.post<Documento>(`${this.api}/documentos`, formulario, {
@@ -260,8 +290,10 @@ export function filtrarDocumentos(docs: Documento[], f: Filtros, hoy = hoyIso())
     if (f.anio && anioDe(d) !== f.anio) return false;
     if (f.area && d.area !== f.area) return false;
     if (f.estado && !cumpleEstado(estadoVencimiento(d, hoy), f.estado)) return false;
+    if (f.uso && d.estadoUso !== f.uso) return false;
     if (buscado) {
-      const donde = normalizar([d.nombre, d.area, d.responsable, d.subidoPor].filter(Boolean).join(' '));
+      const campos = [d.nombre, d.area, d.responsable, d.subidoPor, d.codigo, d.realizo];
+      const donde = normalizar(campos.filter(Boolean).join(' '));
       if (!donde.includes(buscado)) return false;
     }
     return true;

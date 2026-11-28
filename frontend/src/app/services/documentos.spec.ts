@@ -80,6 +80,19 @@ describe('documentos (fechas y filtros)', () => {
     expect(ids({ texto: 'alergenos' })).toEqual(['b']);
     expect(ids({ texto: 'jose' })).toEqual(['a']);
   });
+
+  it('filtra procedimientos por estado (en uso / obsoleto) y busca por código', () => {
+    const docs = [
+      doc({ id: 'p1', codigo: 'PG-SA-001', estadoUso: 'en-uso', realizo: 'Juan Pérez' }),
+      doc({ id: 'p2', codigo: 'PG-LOG-002', estadoUso: 'obsoleto' }),
+    ];
+    const ids = (f: Partial<typeof FILTROS_VACIOS>) =>
+      filtrarDocumentos(docs, { ...FILTROS_VACIOS, ...f }).map((d) => d.id);
+    expect(ids({ uso: 'en-uso' })).toEqual(['p1']);
+    expect(ids({ uso: 'obsoleto' })).toEqual(['p2']);
+    expect(ids({ texto: 'pg-log' })).toEqual(['p2']);
+    expect(ids({ texto: 'perez' })).toEqual(['p1']);
+  });
 });
 
 describe('documentos (avisos)', () => {

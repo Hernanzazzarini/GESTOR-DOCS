@@ -40,6 +40,12 @@ Listo. Desde ese momento corre solo.
 Si actualizás el código, pegalo de nuevo, guardá y repetí el paso 7. Así se reprograman las
 tareas.
 
+> **Procedimientos generales:** desde que se agregó ese módulo, el script escribe los procedimientos
+> en una solapa aparte, **Procedimientos** (se crea sola), con sus columnas: Código, Nombre del
+> documento, Área de uso, Nro revisión, En uso / Obsoleto, Realizó, Copias impresas, Área donde
+> está impreso, fechas, vencimiento y avisos. La solapa **Documentos** queda con los análisis.
+> No manda avisos de los procedimientos **Obsoletos**. Hay que pegar el código nuevo una vez.
+
 ## Uso
 
 - **Gestor de documentos → Actualizar ahora**: actualiza la planilla y manda los avisos que

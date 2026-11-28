@@ -5,9 +5,13 @@
  * Cada hora actualiza la planilla (pasos 1 y 2). Todos los días a la mañana, además, manda los avisos:
  *   1. Recorre Documentos generales / Categoría / Tipo y lee los datos de cada archivo (PDF, Word, Excel)
  *      (los guarda la app en las "properties" del archivo de Drive).
- *   2. Reescribe la hoja "Documentos" con una fila por documento.
+ *   2. Reescribe la hoja "Documentos" con una fila por documento, y la hoja "Procedimientos"
+ *      con los Procedimientos generales (otras columnas: código, revisión, estado, copias…).
  *   3. Manda un mail al responsable (y a los que figuran en "avisar a") de cada documento
- *      que llegó a uno de sus días de aviso.
+ *      que llegó a uno de sus días de aviso. Los procedimientos Obsoletos no avisan.
+ *
+ * Procedimientos generales (otra categoría más en Drive) suman código, realizó, revisión,
+ * estado (En uso / Obsoleto) y copias impresas: van en sus columnas y en el mail.
  *
  * Instalación: ver apps-script/LEEME.md. No se edita a mano la hoja: se pisa en cada pasada.
  */
@@ -15,7 +19,9 @@
 const CONFIG = {
   ROOT_FOLDER_ID: '1G8HUpaK-EWlu5xpmc-8m8HRvmwmwLJuq', // carpeta "Documentos generales"
   URL_APP: 'https://gestor-documentacion.web.app',
-  HOJA: 'Documentos',
+  HOJA: 'Documentos', // análisis y demás categorías
+  HOJA_PROCEDIMIENTOS: 'Procedimientos', // solapa aparte, con las columnas de los procedimientos
+  CATEGORIA_PROCEDIMIENTOS: 'Procedimientos generales', // nombre de su carpeta (backend/src/config/categorias.js)
   ZONA: 'America/Argentina/Buenos_Aires',
   HORA: 7, // hora del día en que corre (aprox.)
   MAXIMO_AVISAR: 10,
@@ -141,8 +147,17 @@ function aDocumento(f, categoria, tipo) {
     subidoPor: p.subidoPor || '',
     diasAviso: p.diasAviso ? p.diasAviso.split(',').map(Number) : [],
     avisar,
+    // Procedimientos generales (vacíos en los demás documentos)
+    codigo: p.codigo || '',
+    realizo: p.realizo || '',
+    revision: p.revision !== undefined && p.revision !== '' ? Number(p.revision) : '',
+    estadoUso: p.estadoUso || '', // "en-uso" u "obsoleto"
+    copias: p.copias ? Number(p.copias) : '',
+    areasImpresion: p.areasImpresion ? p.areasImpresion.split(',') : [],
   };
 }
+
+const ETIQUETAS_USO = { 'en-uso': 'En uso', obsoleto: 'Obsoleto' };
 
 // ── Fechas (sin horas: "AAAA-MM-DD") ──────────────────────────────────────
 
@@ -173,13 +188,11 @@ function estado(doc, hoy) {
 }
 
 // ── Planilla ──────────────────────────────────────────────────────────────
-
-const COLUMNAS = [
-  'Categoría', 'Tipo', 'Nombre', 'Área', 'Fecha de realización', 'Año', 'Fecha de vencimiento',
-  'Estado', 'Días para vencer', 'Responsable', 'Avisar también a', 'Avisos (días antes)', 'Subido por', 'Link',
-];
+// Dos solapas: "Documentos" (análisis y demás categorías) y "Procedimientos"
+// (Procedimientos generales, con sus propias columnas).
 
 const COLORES_ESTADO = { Vencido: '#fdecea', 'Por vencer': '#fff4e0', Vigente: '#e7f6ec', 'No vence': null };
+const COLORES_USO = { 'En uso': '#e7f6ec', Obsoleto: '#e2e8f0' };
 
 function aFecha(iso) {
   if (!iso) return '';
@@ -187,38 +200,83 @@ function aFecha(iso) {
   return new Date(a, m - 1, d);
 }
 
-function filasPlanilla(docs, hoy) {
-  // Primero los que vencen antes; los que no vencen, al final
-  const orden = (d) => d.fechaVencimiento || '9999-12-31';
-  return [...docs]
-    .sort((a, b) => orden(a).localeCompare(orden(b)) || a.nombre.localeCompare(b.nombre))
-    .map((d) => [
-      d.categoria,
-      d.tipo,
-      d.nombre,
-      d.area,
-      aFecha(d.fechaRealizacion),
-      d.fechaRealizacion ? Number(d.fechaRealizacion.slice(0, 4)) : '',
-      aFecha(d.fechaVencimiento),
-      estado(d, hoy),
-      d.fechaVencimiento ? diasEntre(hoy, d.fechaVencimiento) : '',
-      d.responsable,
-      d.avisar.join(', '),
-      d.diasAviso.join(', '),
-      d.subidoPor,
-      d.link,
-    ]);
+const anioDe = (d) => (d.fechaRealizacion ? Number(d.fechaRealizacion.slice(0, 4)) : '');
+const diasParaVencer = (d, hoy) => (d.fechaVencimiento ? diasEntre(hoy, d.fechaVencimiento) : '');
+
+/** true si el documento está en la carpeta de Procedimientos generales. */
+function esProcedimiento(doc) {
+  return doc.categoria === CONFIG.CATEGORIA_PROCEDIMIENTOS;
 }
+
+/**
+ * Cada columna: { titulo, valor(doc, hoy), fecha?: true, colores?: {texto: color} }.
+ * Para agregar o mover una columna alcanza con tocar estas listas.
+ */
+const COLUMNAS_DOCUMENTOS = [
+  { titulo: 'Categoría', valor: (d) => d.categoria },
+  { titulo: 'Tipo', valor: (d) => d.tipo },
+  { titulo: 'Nombre', valor: (d) => d.nombre },
+  { titulo: 'Área', valor: (d) => d.area },
+  { titulo: 'Fecha de realización', valor: (d) => aFecha(d.fechaRealizacion), fecha: true },
+  { titulo: 'Año', valor: anioDe },
+  { titulo: 'Fecha de vencimiento', valor: (d) => aFecha(d.fechaVencimiento), fecha: true },
+  { titulo: 'Estado', valor: (d, hoy) => estado(d, hoy), colores: COLORES_ESTADO },
+  { titulo: 'Días para vencer', valor: diasParaVencer },
+  { titulo: 'Responsable', valor: (d) => d.responsable },
+  { titulo: 'Avisar también a', valor: (d) => d.avisar.join(', ') },
+  { titulo: 'Avisos (días antes)', valor: (d) => d.diasAviso.join(', ') },
+  { titulo: 'Subido por', valor: (d) => d.subidoPor },
+  { titulo: 'Link', valor: (d) => d.link },
+];
+
+const COLUMNAS_PROCEDIMIENTOS = [
+  { titulo: 'Código', valor: (d) => d.codigo },
+  { titulo: 'Nombre del documento', valor: (d) => d.nombre },
+  { titulo: 'Área de uso', valor: (d) => d.tipo },
+  { titulo: 'Nro revisión', valor: (d) => d.revision },
+  { titulo: 'En uso / Obsoleto', valor: (d) => ETIQUETAS_USO[d.estadoUso] || '', colores: COLORES_USO },
+  { titulo: 'Realizó', valor: (d) => d.realizo },
+  { titulo: 'Copias impresas', valor: (d) => (d.copias === '' ? 0 : d.copias) },
+  { titulo: 'Área donde está impreso', valor: (d) => d.areasImpresion.join(', ') },
+  { titulo: 'Fecha de realización', valor: (d) => aFecha(d.fechaRealizacion), fecha: true },
+  { titulo: 'Año', valor: anioDe },
+  { titulo: 'Fecha de vencimiento', valor: (d) => aFecha(d.fechaVencimiento), fecha: true },
+  { titulo: 'Vencimiento', valor: (d, hoy) => estado(d, hoy), colores: COLORES_ESTADO },
+  { titulo: 'Días para vencer', valor: diasParaVencer },
+  { titulo: 'Responsable', valor: (d) => d.responsable },
+  { titulo: 'Avisar también a', valor: (d) => d.avisar.join(', ') },
+  { titulo: 'Avisos (días antes)', valor: (d) => (d.estadoUso === 'obsoleto' ? 'No avisa (obsoleto)' : d.diasAviso.join(', ')) },
+  { titulo: 'Subido por', valor: (d) => d.subidoPor },
+  { titulo: 'Link', valor: (d) => d.link },
+];
 
 function escribirPlanilla(docs) {
   const libro = SpreadsheetApp.getActiveSpreadsheet();
-  const hoja = libro.getSheetByName(CONFIG.HOJA) || libro.insertSheet(CONFIG.HOJA, 0);
   const hoy = hoyIso();
-  const filas = filasPlanilla(docs, hoy);
+  // Primero los que vencen antes; los que no vencen, al final
+  const orden = (d) => d.fechaVencimiento || '9999-12-31';
+  const ordenados = [...docs].sort((a, b) => orden(a).localeCompare(orden(b)) || a.nombre.localeCompare(b.nombre));
+
+  escribirHoja(libro, CONFIG.HOJA, 0, COLUMNAS_DOCUMENTOS, ordenados.filter((d) => !esProcedimiento(d)), hoy);
+  // Procedimientos: por área de uso y código
+  const procedimientos = docs
+    .filter(esProcedimiento)
+    .sort((a, b) => a.tipo.localeCompare(b.tipo, 'es') || a.codigo.localeCompare(b.codigo, 'es') || a.nombre.localeCompare(b.nombre));
+  escribirHoja(libro, CONFIG.HOJA_PROCEDIMIENTOS, 1, COLUMNAS_PROCEDIMIENTOS, procedimientos, hoy);
+}
+
+/** Reescribe una solapa entera (la crea si no existe, en la posición indicada). */
+function escribirHoja(libro, nombre, posicion, columnas, docs, hoy) {
+  const hoja = libro.getSheetByName(nombre) || libro.insertSheet(nombre, posicion);
+  const filas = docs.map((d) => columnas.map((c) => c.valor(d, hoy)));
 
   if (hoja.getFilter()) hoja.getFilter().remove();
   hoja.clear();
-  hoja.getRange(1, 1, 1, COLUMNAS.length).setValues([COLUMNAS]).setFontWeight('bold').setBackground('#e2e8f0');
+  hoja
+    .getRange(1, 1, 1, columnas.length)
+    .setValues([columnas.map((c) => c.titulo)])
+    .setFontWeight('bold')
+    .setBackground('#e2e8f0');
   hoja.setFrozenRows(1);
   hoja
     .getRange('A1')
@@ -226,13 +284,15 @@ function escribirPlanilla(docs) {
       `Se actualiza cada hora. Última actualización: ${Utilities.formatDate(new Date(), CONFIG.ZONA, 'dd/MM/yyyy HH:mm')}`);
 
   if (filas.length) {
-    hoja.getRange(2, 1, filas.length, COLUMNAS.length).setValues(filas);
-    hoja.getRange(2, 5, filas.length, 1).setNumberFormat('dd/mm/yyyy');
-    hoja.getRange(2, 7, filas.length, 1).setNumberFormat('dd/mm/yyyy');
-    hoja.getRange(2, 8, filas.length, 1).setBackgrounds(filas.map((f) => [COLORES_ESTADO[f[7]]]));
+    hoja.getRange(2, 1, filas.length, columnas.length).setValues(filas);
+    columnas.forEach((c, i) => {
+      const rango = hoja.getRange(2, i + 1, filas.length, 1);
+      if (c.fecha) rango.setNumberFormat('dd/mm/yyyy');
+      if (c.colores) rango.setBackgrounds(filas.map((f) => [c.colores[f[i]] || null]));
+    });
   }
-  hoja.getRange(1, 1, filas.length + 1, COLUMNAS.length).createFilter();
-  hoja.autoResizeColumns(1, COLUMNAS.length);
+  hoja.getRange(1, 1, filas.length + 1, columnas.length).createFilter();
+  hoja.autoResizeColumns(1, columnas.length);
 }
 
 // ── Avisos por mail ───────────────────────────────────────────────────────
@@ -248,14 +308,16 @@ function claveAviso(doc, dias) {
  */
 function avisosPendientes(doc, hoy, yaEnviados) {
   if (!doc.fechaVencimiento || !doc.diasAviso.length || !doc.responsable) return [];
+  if (doc.estadoUso === 'obsoleto') return []; // un procedimiento que ya no se usa no avisa
   const faltan = diasEntre(hoy, doc.fechaVencimiento);
   return doc.diasAviso.filter((n) => faltan <= n && !yaEnviados.has(claveAviso(doc, n)));
 }
 
 function asuntoAviso(doc, faltan) {
-  if (faltan > 0) return `Vence en ${faltan} día${faltan === 1 ? '' : 's'}: ${doc.nombre}`;
-  if (faltan === 0) return `Vence hoy: ${doc.nombre}`;
-  return `Vencido hace ${-faltan} día${faltan === -1 ? '' : 's'}: ${doc.nombre}`;
+  const nombre = doc.codigo ? `${doc.codigo} ${doc.nombre}` : doc.nombre;
+  if (faltan > 0) return `Vence en ${faltan} día${faltan === 1 ? '' : 's'}: ${nombre}`;
+  if (faltan === 0) return `Vence hoy: ${nombre}`;
+  return `Vencido hace ${-faltan} día${faltan === -1 ? '' : 's'}: ${nombre}`;
 }
 
 function cuerpoAviso(doc, faltan) {
@@ -266,7 +328,10 @@ function cuerpoAviso(doc, faltan) {
     `<p>El documento <b>${esc(doc.nombre)}</b> ${situacion}.</p>` +
     '<table style="border-collapse:collapse;font-size:14px">' +
     fila('Categoría', `${doc.categoria} › ${doc.tipo}`) +
-    fila('Área', doc.area || '—') +
+    (doc.codigo ? fila('Código', doc.codigo) + fila('Nro de revisión', doc.revision) : '') +
+    fila(doc.codigo ? 'Área de uso' : 'Área', doc.area || '—') +
+    (doc.realizo ? fila('Realizó', doc.realizo) : '') +
+    (doc.copias ? fila('Copias impresas', `${doc.copias} (${doc.areasImpresion.join(', ')})`) : '') +
     fila('Realización', formatearFecha(doc.fechaRealizacion) || '—') +
     fila('Vencimiento', formatearFecha(doc.fechaVencimiento)) +
     fila('Responsable', doc.responsable) +

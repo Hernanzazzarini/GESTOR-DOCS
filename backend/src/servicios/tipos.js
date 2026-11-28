@@ -22,10 +22,15 @@ export function idDeNombre(nombre) {
     .replace(/^-|-$/g, '');
 }
 
+/** Cómo se le dice a un tipo en la categoría ("tipo de análisis", "área de uso"). */
+export function etiquetaTipo(categoria) {
+  return categoria?.etiquetaTipo ?? 'tipo de análisis';
+}
+
 /** Limpia y valida el nombre que escribió el usuario. */
-export function validarNombreTipo(texto) {
+export function validarNombreTipo(texto, etiqueta = 'tipo de análisis') {
   const nombre = String(texto ?? '').trim().replace(/\s+/g, ' ');
-  if (!nombre) throw new ErrorHttp(400, 'Escribí el nombre del tipo de análisis.');
+  if (!nombre) throw new ErrorHttp(400, `Escribí el nombre del ${etiqueta}.`);
   if (nombre.length > LARGO_MAXIMO_TIPO) {
     throw new ErrorHttp(400, `El nombre puede tener hasta ${LARGO_MAXIMO_TIPO} caracteres.`);
   }
@@ -73,12 +78,18 @@ export function crearServicioTipos(carpetas, rootFolderId) {
     async agregar(categoriaId, texto) {
       const categoria = CATEGORIAS.find((c) => c.id === categoriaId);
       if (!categoria) throw new ErrorHttp(404, 'La categoría no existe.');
-      const nombre = validarNombreTipo(texto);
+      const nombre = validarNombreTipo(texto, etiquetaTipo(categoria));
       const id = idDeNombre(nombre);
 
       cache.delete(categoria.id); // se compara con lo que hay ahora en Drive
       const repetido = (await tipos(categoria)).find((t) => t.id === id);
-      if (repetido) throw new ErrorHttp(409, `Ya existe un tipo de análisis llamado "${repetido.nombre}".`);
+      if (repetido) {
+        // "Ya existe un tipo de análisis llamado…" / "Ya existe el área de uso…"
+        const mensaje = categoria.etiquetaTipo
+          ? `Ya existe el ${categoria.etiquetaTipo} "${repetido.nombre}".`
+          : `Ya existe un tipo de análisis llamado "${repetido.nombre}".`;
+        throw new ErrorHttp(409, mensaje);
+      }
 
       await carpetas.crearCarpetaTipo(rootFolderId, categoria, nombre);
       cache.delete(categoria.id);

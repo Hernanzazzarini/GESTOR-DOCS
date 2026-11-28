@@ -29,6 +29,17 @@ export const routes: Routes = [
     data: { pantalla: 'documentos' },
   },
 
+  // ── Módulo Procedimientos generales ──────────────────────────────────
+  // Usa la misma pantalla que una categoría de Documentación, con la categoría fija
+  // (backend/src/config/categorias.js → id "procedimientos")
+  {
+    path: 'procedimientos',
+    loadComponent: () =>
+      import('./components/categoria/categoria').then((m) => m.CategoriaComponent),
+    canActivate: [authGuard, pantallaGuard],
+    data: { pantalla: 'procedimientos', categoria: 'procedimientos' },
+  },
+
   // ➕ Módulos nuevos acá, con canActivate: [authGuard, pantallaGuard] y data: { pantalla: '<id>' }
 
   { path: 'admin-usuarios', component: AdminUsuariosComponent, canActivate: [authGuard, adminGuard] },

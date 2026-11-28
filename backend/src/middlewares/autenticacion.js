@@ -24,10 +24,14 @@ export function autenticar({ verificarToken, leerPerfil }) {
   };
 }
 
-/** Exige que el usuario tenga habilitado el módulo (igual que el pantallaGuard del front end). */
-export function requiereModulo(modulo) {
+/**
+ * Exige que el usuario tenga habilitado el módulo (igual que el pantallaGuard del front end).
+ * Con una lista, alcanza con uno: el controlador después controla el de cada categoría.
+ */
+export function requiereModulo(modulos) {
+  const lista = [].concat(modulos);
   return (req, _res, next) => {
-    if (!puedeVerModulo(req.usuario?.perfil, modulo)) {
+    if (!lista.some((m) => puedeVerModulo(req.usuario?.perfil, m))) {
       throw new ErrorHttp(403, 'No tenés habilitado este módulo.');
     }
     next();

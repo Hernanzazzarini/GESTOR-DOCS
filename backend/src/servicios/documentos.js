@@ -52,9 +52,10 @@ export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearSer
    * Comprueba que el archivo es un PDF que está en Documentos generales / Categoría / Tipo / Año
    * (o directo en el Tipo, como se guardaban antes de separar por año).
    * Así nadie puede abrir o borrar otro archivo de la Unidad compartida adivinando su ID.
-   * Devuelve { archivo, tipoId }.
+   * permitir(nombreCategoria) → false si el usuario no puede ver esa categoría (403).
+   * Devuelve { archivo, tipoId, tipo, categoria } (tipo y categoria: nombres de las carpetas).
    */
-  async function verificarUbicacion(id) {
+  async function verificarUbicacion(id, permitir = () => true) {
     try {
       const { data: archivo } = await drive.files.get({
         fileId: id,
@@ -66,13 +67,18 @@ export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearSer
       const padre = await carpeta(archivo.parents?.[0]);
       const abuelo = await carpeta(padre.parents?.[0]);
       const bisabuelo = await carpeta(abuelo.parents?.[0]);
+      let ubicacion;
       // Sin año: padre = tipo, abuelo = categoría, bisabuelo = raíz
-      if (bisabuelo.id === rootFolderId) return { archivo, tipoId: padre.id };
-      // Con año: padre = año, abuelo = tipo, bisabuelo = categoría
-      if (ES_ANIO.test(padre.name) && bisabuelo.parents?.[0] === rootFolderId) {
-        return { archivo, tipoId: abuelo.id };
+      if (bisabuelo.id === rootFolderId) {
+        ubicacion = { archivo, tipoId: padre.id, tipo: padre.name, categoria: abuelo.name };
+      } else if (ES_ANIO.test(padre.name) && bisabuelo.parents?.[0] === rootFolderId) {
+        // Con año: padre = año, abuelo = tipo, bisabuelo = categoría
+        ubicacion = { archivo, tipoId: abuelo.id, tipo: abuelo.name, categoria: bisabuelo.name };
+      } else {
+        throw new ErrorHttp(403, 'Ese archivo no pertenece a Documentos generales.');
       }
-      throw new ErrorHttp(403, 'Ese archivo no pertenece a Documentos generales.');
+      if (!permitir(ubicacion.categoria)) throw new ErrorHttp(403, 'No tenés habilitado este módulo.');
+      return ubicacion;
     } catch (err) {
       if (esNoEncontrado(err)) throw new ErrorHttp(404, 'El documento no existe.');
       throw err;
@@ -122,14 +128,18 @@ export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearSer
       });
     },
 
-    /** Un documento con sus datos (comprueba que esté en Documentos generales). */
-    async obtener(id) {
-      return aDocumento((await verificarUbicacion(id)).archivo);
+    /**
+     * Un documento con sus datos (comprueba que esté en Documentos generales).
+     * Trae también ubicacion: { categoria, tipo } (nombres de las carpetas), para uso interno.
+     */
+    async obtener(id, permitir) {
+      const { archivo, categoria, tipo } = await verificarUbicacion(id, permitir);
+      return { ...aDocumento(archivo), ubicacion: { categoria, tipo } };
     },
 
     /** Cambia el nombre y los datos (no el PDF). Si cambió el año de realización, lo pasa a esa carpeta. */
-    async actualizar(id, { nombre, datos }) {
-      const { archivo, tipoId } = await verificarUbicacion(id);
+    async actualizar(id, { nombre, datos }, permitir) {
+      const { archivo, tipoId } = await verificarUbicacion(id, permitir);
       return conReintento(async () => {
         const destino = await carpetas.carpetaAnio(tipoId, datos.fechaRealizacion.slice(0, 4));
         const actual = archivo.parents[0];
@@ -145,8 +155,8 @@ export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearSer
     },
 
     /** Devuelve { nombre, mime, flujo } para mandar el archivo al navegador. */
-    async descargar(id) {
-      const { archivo } = await verificarUbicacion(id);
+    async descargar(id, permitir) {
+      const { archivo } = await verificarUbicacion(id, permitir);
       const res = await drive.files.get(
         { fileId: id, alt: 'media', supportsAllDrives: true },
         { responseType: 'stream' },
@@ -158,8 +168,8 @@ export function crearServicioDocumentos(drive, rootFolderId, carpetas = crearSer
      * Manda el documento a la papelera de la Unidad compartida (no lo borra para siempre):
      * desde Drive se puede recuperar durante 30 días (mejora sugerida "Papelera").
      */
-    async eliminar(id) {
-      await verificarUbicacion(id);
+    async eliminar(id, permitir) {
+      await verificarUbicacion(id, permitir);
       await drive.files.update({ fileId: id, supportsAllDrives: true, requestBody: { trashed: true } });
     },
   };

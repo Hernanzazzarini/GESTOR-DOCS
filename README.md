@@ -273,6 +273,20 @@ Se edita **un solo archivo**: `backend/src/config/categorias.js`. Por ejemplo, p
 
 Guardás, hacés push y Render lo vuelve a publicar solo. **El frontend no se toca.**
 
+### Procedimientos generales
+
+Es una tarjeta propia en Inicio (módulo `procedimientos`, en Drive la carpeta
+**Documentos generales › Procedimientos generales › Área de uso › Año**). Usa la misma pantalla
+que una categoría, pero cada procedimiento lleva además: código, nombre del documento, realizó,
+Nro de revisión, estado (**En uso** / **Obsoleto**), cantidad de copias impresas y en qué áreas
+están impresas. Las áreas de uso (Seguridad alimentaria, Calidad, Logística) están en
+`backend/src/config/categorias.js` y se pueden agregar más desde la pantalla (**＋ Agregar área**).
+Los avisos de vencimiento salen por el mismo Apps Script (los obsoletos no avisan), y en la planilla
+**Registro de documentos** los procedimientos van en su propia solapa, **Procedimientos**.
+
+Los usuarios que tienen módulos elegidos a mano en **Gestión de Usuarios** no lo ven hasta que
+el admin les tilde **Procedimientos generales**.
+
 ### Un módulo nuevo (por ejemplo "Mantenimiento")
 
 1. `frontend/src/app/permisos.ts`: sumá `'mantenimiento'` al tipo `Pantalla` y un objeto a

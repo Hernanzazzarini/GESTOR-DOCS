@@ -80,6 +80,8 @@ const PERFILES = {
   'token-operador': { uid: 'u2', email: 'op@olega.com.ar', perfil: { rol: 'operador' } },
   'token-sin-modulo': { uid: 'u3', email: 'x@olega.com.ar', perfil: { rol: 'operador', pantallas: [] } },
   'token-sin-rol': { uid: 'u4', email: 'y@olega.com.ar', perfil: null },
+  'token-solo-docs': { uid: 'u5', email: 'd@olega.com.ar', perfil: { rol: 'operador', pantallas: ['documentos'] } },
+  'token-solo-proc': { uid: 'u6', email: 'p@olega.com.ar', perfil: { rol: 'operador', pantallas: ['procedimientos'] } },
 };
 
 function armar() {
@@ -443,6 +445,109 @@ describe('API gestor de documentación', () => {
     const tipoId = drive.archivos.get(doc.id).parents[0];
     drive.archivos.delete(tipoId); // alguien la borró en Drive
     await subir(app, 'token-operador').expect(201);
+  });
+
+  // ── Procedimientos generales ──────────────────────────────────────────
+
+  const PROCEDIMIENTO = {
+    nombre: 'Lavado de manos',
+    fechaRealizacion: '2026-05-04',
+    fechaVencimiento: '2027-05-04',
+    responsable: 'maria@olega.com.ar',
+    diasAviso: '30,0',
+    avisar: '',
+    codigo: 'PG-SA-001',
+    realizo: 'Juan Pérez',
+    revision: '3',
+    estadoUso: 'en-uso',
+    copias: '2',
+    areasImpresion: 'Planta, Depósito',
+  };
+  const subirProcedimiento = (token, datos = PROCEDIMIENTO, tipo = 'seguridad-alimentaria') =>
+    subir(app, token, { categoria: 'procedimientos', tipo, nombre: 'Lavado de manos.pdf', datos });
+
+  it('sube un procedimiento con código, revisión, estado y copias (el área es el área de uso)', async () => {
+    const { body: doc } = await subirProcedimiento('token-operador').expect(201);
+    assert.equal(doc.codigo, 'PG-SA-001');
+    assert.equal(doc.realizo, 'Juan Pérez');
+    assert.equal(doc.revision, 3);
+    assert.equal(doc.estadoUso, 'en-uso');
+    assert.equal(doc.copias, 2);
+    assert.deepEqual(doc.areasImpresion, ['Planta', 'Depósito']);
+    assert.equal(doc.area, 'Seguridad alimentaria');
+    assert.deepEqual(doc.diasAviso, [30, 0]);
+
+    const archivo = drive.archivos.get(doc.id);
+    assert.equal(archivo.properties.estadoUso, 'en-uso'); // públicas: las lee el script de avisos
+    const tipo = drive.archivos.get(drive.archivos.get(archivo.parents[0]).parents[0]);
+    assert.equal(tipo.name, 'Seguridad alimentaria');
+    assert.equal(drive.archivos.get(tipo.parents[0]).name, 'Procedimientos generales');
+  });
+
+  it('valida los datos del procedimiento', async () => {
+    const con = (cambios) => subirProcedimiento('token-operador', { ...PROCEDIMIENTO, ...cambios });
+    await con({ codigo: '' }).expect(400);
+    const sinNombre = await con({ nombre: '  ' }).expect(400);
+    assert.match(sinNombre.body.mensaje, /nombre del documento/);
+    await con({ realizo: ' ' }).expect(400);
+    await con({ revision: 'A' }).expect(400);
+    await con({ revision: '' }).expect(400);
+    await con({ estadoUso: 'vigente' }).expect(400);
+    await con({ copias: '-1' }).expect(400);
+    const sinArea = await con({ copias: '1', areasImpresion: '' }).expect(400);
+    assert.match(sinArea.body.mensaje, /en qué área/);
+    // Sin copias impresas no se guardan áreas de impresión
+    const { body } = await con({ copias: '0', areasImpresion: 'Planta' }).expect(201);
+    assert.deepEqual(body.areasImpresion, []);
+    assert.equal(body.copias, 0);
+  });
+
+  it('edita un procedimiento: pasa a Obsoleto y conserva el área de uso', async () => {
+    const { body: doc } = await subirProcedimiento('token-operador').expect(201);
+    const { body } = await request(app)
+      .patch(`/api/documentos/${doc.id}`)
+      .set(como('token-operador'))
+      .send({ ...PROCEDIMIENTO, area: 'Otra', revision: 4, estadoUso: 'obsoleto', copias: 0, avisar: [], diasAviso: [30] })
+      .expect(200);
+    assert.equal(body.estadoUso, 'obsoleto');
+    assert.equal(body.revision, 4);
+    assert.equal(body.area, 'Seguridad alimentaria');
+    assert.equal(drive.archivos.get(doc.id).properties.areasImpresion, undefined);
+  });
+
+  it('se pueden agregar áreas de uso nuevas', async () => {
+    const r = await request(app)
+      .post('/api/categorias/procedimientos/tipos')
+      .set(como('token-operador'))
+      .send({ nombre: 'Mantenimiento' })
+      .expect(201);
+    assert.equal(r.body.id, 'mantenimiento');
+    const repetida = await request(app)
+      .post('/api/categorias/procedimientos/tipos')
+      .set(como('token-operador'))
+      .send({ nombre: 'logistica' })
+      .expect(409);
+    assert.match(repetida.body.mensaje, /Ya existe el área de uso "Logística"/);
+    await subirProcedimiento('token-operador', PROCEDIMIENTO, 'mantenimiento').expect(201);
+  });
+
+  it('cada módulo ve solo sus categorías y documentos', async () => {
+    const docs = await request(app).get('/api/categorias').set(como('token-solo-docs')).expect(200);
+    assert.deepEqual(docs.body.categorias.map((c) => c.id), ['analisis']);
+    const proc = await request(app).get('/api/categorias').set(como('token-solo-proc')).expect(200);
+    assert.deepEqual(proc.body.categorias.map((c) => c.id), ['procedimientos']);
+
+    const { body: p } = await subirProcedimiento('token-solo-proc').expect(201);
+    await subirProcedimiento('token-solo-docs').expect(403);
+    await subir(app, 'token-solo-proc').expect(403);
+    await request(app).get('/api/documentos?categoria=procedimientos&tipo=calidad').set(como('token-solo-docs')).expect(403);
+    await request(app).get(`/api/documentos/${p.id}/archivo`).set(como('token-solo-docs')).expect(403);
+    await request(app).get(`/api/documentos/${p.id}/archivo`).set(como('token-solo-proc')).expect(200);
+    await request(app)
+      .post('/api/categorias/procedimientos/tipos')
+      .set(como('token-solo-docs'))
+      .send({ nombre: 'Otra' })
+      .expect(403);
   });
 
   it('bloquea llamadas desde otros sitios web', async () => {

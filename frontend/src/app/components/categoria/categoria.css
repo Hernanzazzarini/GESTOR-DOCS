@@ -260,6 +260,78 @@ h3 {
   color: #c0392b;
 }
 
+/* Procedimientos generales */
+.etiqueta-campo {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 500;
+  color: #34495e;
+  font-size: 0.9rem;
+}
+
+.opciones-uso {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.opciones-uso .opcion-uso {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.opcion-uso input {
+  width: auto;
+  margin: 0;
+}
+
+.opcion-uso.elegida {
+  border-color: #1e7b3c;
+  background: #e7f6ec;
+  color: #1e7b3c;
+}
+
+.opcion-obsoleto.elegida {
+  border-color: #64748b;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.area-fija {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.9rem;
+}
+
+.uso {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.uso-en-uso {
+  background: #e7f6ec;
+  color: #1e7b3c;
+}
+
+.uso-obsoleto {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.celda-codigo .nota,
+.celda-copias .nota {
+  display: block;
+}
+
 select.sin-elegir {
   color: var(--gris);
 }

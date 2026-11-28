@@ -16,7 +16,7 @@ export const ROLES: { id: Rol; texto: string }[] = [
   { id: 'admin', texto: 'Administrador' },
 ];
 
-export type Pantalla = 'documentos';
+export type Pantalla = 'documentos' | 'procedimientos';
 
 export interface DefPantalla {
   id: Pantalla;
@@ -32,6 +32,13 @@ export const PANTALLAS: DefPantalla[] = [
     texto: 'Documentación',
     descripcion: 'Subí, consultá y descargá los PDF de la empresa por categoría.',
     icono: '📁',
+    roles: ['admin', 'encargado', 'operador'],
+  },
+  {
+    id: 'procedimientos',
+    texto: 'Procedimientos generales',
+    descripcion: 'Cargá los procedimientos con código, revisión, estado, copias impresas y avisos de vencimiento.',
+    icono: '📋',
     roles: ['admin', 'encargado', 'operador'],
   },
 ];

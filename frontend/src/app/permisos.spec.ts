@@ -2,11 +2,15 @@ import { pantallasPermitidas, puedeEliminar, rutaInicial } from './permisos';
 
 describe('permisos', () => {
   it('el admin ve todos los módulos aunque tenga una lista vacía', () => {
-    expect(pantallasPermitidas({ rol: 'admin', pantallas: [] })).toEqual(['documentos']);
+    expect(pantallasPermitidas({ rol: 'admin', pantallas: [] })).toEqual(['documentos', 'procedimientos']);
   });
 
   it('sin permisos propios se usan los del rol', () => {
-    expect(pantallasPermitidas({ rol: 'operador' })).toEqual(['documentos']);
+    expect(pantallasPermitidas({ rol: 'operador' })).toEqual(['documentos', 'procedimientos']);
+  });
+
+  it('se puede habilitar solo Procedimientos generales', () => {
+    expect(pantallasPermitidas({ rol: 'operador', pantallas: ['procedimientos'] })).toEqual(['procedimientos']);
   });
 
   it('con permisos propios se usan esos (e ignora ids que ya no existen)', () => {
