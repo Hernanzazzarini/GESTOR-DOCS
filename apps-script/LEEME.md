@@ -3,7 +3,7 @@
 Este programa de Google (Apps Script) vive dentro de una planilla de Google en la carpeta
 **Documentos generales**.
 
-1. **Cada hora** actualiza la hoja **Documentos**, con una fila por cada PDF: categoría, tipo,
+1. **Cada hora** actualiza la hoja **Documentos**, con una fila por cada archivo (PDF, Word o Excel): categoría, tipo,
    área, fechas, estado, responsable, a quién se avisa y el link.
 2. **Todos los días, alrededor de las 7 de la mañana**, manda un mail al responsable de cada documento que llegó a uno de sus días de aviso.
    Las personas cargadas en "A quién avisar" van en copia.
@@ -39,6 +39,12 @@ Listo. Desde ese momento corre solo.
 
 Si actualizás el código, pegalo de nuevo, guardá y repetí el paso 7. Así se reprograman las
 tareas.
+
+> **Procedimientos generales:** desde que se agregó ese módulo, el script escribe los procedimientos
+> en una solapa aparte, **Procedimientos** (se crea sola), con sus columnas: Código, Nombre del
+> documento, Área de uso, Nro revisión, En uso / Obsoleto, Realizó, Copias impresas, Área donde
+> está impreso, fechas, vencimiento y avisos. La solapa **Documentos** queda con los análisis.
+> No manda avisos de los procedimientos **Obsoletos**. Hay que pegar el código nuevo una vez.
 
 ## Uso
 

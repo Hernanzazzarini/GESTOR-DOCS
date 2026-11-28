@@ -8,14 +8,66 @@ import { environment } from '../../environments/environment';
 export interface Tipo {
   id: string;
   nombre: string;
+  agregado?: boolean; // true si lo agregó un usuario (no es de los fijos)
+}
+
+export const LARGO_MAXIMO_TIPO = 60;
+
+/** Formatos que se pueden subir (el back end los vuelve a controlar: config/formatos.js). */
+export const EXTENSIONES = ['pdf', 'docx', 'doc', 'xlsx', 'xls'];
+export const ACEPTA_ARCHIVOS = EXTENSIONES.map((e) => `.${e}`).join(',');
+
+/** "Informe.DOCX" → "docx" (o null si no es PDF, Word ni Excel). */
+export function extensionDe(nombre: string): string | null {
+  const ext = nombre.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() ?? '';
+  return EXTENSIONES.includes(ext) ? ext : null;
+}
+
+/** "Informe.docx" → "Informe" (solo saca las extensiones permitidas). */
+export function sinExtension(nombre: string): string {
+  return extensionDe(nombre) ? nombre.replace(/\.[^.]+$/, '') : nombre;
+}
+
+/** Etiqueta corta y familia del archivo, para el ícono de la tabla. */
+export function tipoDeArchivo(formato: string): { etiqueta: string; clase: 'pdf' | 'word' | 'excel' } {
+  if (formato === 'docx' || formato === 'doc') return { etiqueta: 'DOC', clase: 'word' };
+  if (formato === 'xlsx' || formato === 'xls') return { etiqueta: 'XLS', clase: 'excel' };
+  return { etiqueta: 'PDF', clase: 'pdf' };
+}
+
+/**
+ * "Agua - Microbiológico" → "agua-microbiologico". Igual que en el back end (servicios/tipos.js):
+ * dos tipos con el mismo id se consideran el mismo nombre y no se pueden repetir.
+ */
+export function idDeNombre(nombre: string): string {
+  return nombre
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 export interface Categoria {
   id: string;
   nombre: string;
   descripcion?: string;
+  modulo?: string; // sin definir: Documentación ("documentos")
+  procedimiento?: boolean; // true: Procedimientos generales (pide código, revisión, copias…)
+  etiquetaTipo?: string; // cómo se le dice a un tipo ("área de uso"); por defecto "tipo de análisis"
   tipos: Tipo[];
 }
+
+/** Estado de un procedimiento. */
+export type EstadoUso = 'en-uso' | 'obsoleto';
+
+export const ETIQUETAS_USO: Record<EstadoUso, string> = {
+  'en-uso': 'En uso',
+  obsoleto: 'Obsoleto',
+};
+
+export const MAXIMO_REVISION = 999; // igual que el back end
+export const MAXIMO_COPIAS = 999;
 
 export interface RespuestaCategorias {
   categorias: Categoria[];
@@ -26,6 +78,7 @@ export interface RespuestaCategorias {
 export interface Documento {
   id: string;
   nombre: string;
+  formato: string; // "pdf", "docx", "doc", "xlsx" o "xls"
   tamanio: number; // bytes
   fecha: string; // ISO
   subidoPor: string | null;
@@ -35,17 +88,31 @@ export interface Documento {
   responsable: string | null; // mail de un usuario registrado
   diasAviso: number[]; // días antes del vencimiento en que se manda el mail (0 = el mismo día)
   avisar: string[]; // mails que reciben el aviso además del responsable
+  // Solo en Procedimientos generales (null o vacío en los demás)
+  codigo?: string | null;
+  realizo?: string | null; // quién realizó el documento
+  revision?: number | null; // Nro de revisión
+  estadoUso?: EstadoUso | null;
+  copias?: number | null; // cantidad de copias impresas
+  areasImpresion?: string[]; // áreas donde están las copias impresas
 }
 
-/** Lo que se carga junto con el PDF (o al editarlo). */
+/** Lo que se carga junto con el archivo (o al editarlo). */
 export interface DatosDocumento {
-  nombre: string; // sin ".pdf"; vacío = el nombre del archivo
+  nombre: string; // sin la extensión; vacío = el nombre del archivo
   area: string;
   fechaRealizacion: string;
   fechaVencimiento: string; // vacío = no vence
   responsable: string;
   diasAviso: number[];
   avisar: string[];
+  // Solo en Procedimientos generales (el área es el área de uso: la pone el back end)
+  codigo?: string;
+  realizo?: string;
+  revision?: number | null;
+  estadoUso?: EstadoUso;
+  copias?: number | null;
+  areasImpresion?: string[];
 }
 
 export const DIAS_AVISO_POR_DEFECTO = [30, 7, 0]; // igual que el back end
@@ -62,9 +129,10 @@ export interface Filtros {
   anio: string; // "" = todos
   area: string; // "" = todas
   estado: FiltroEstado; // "" = todos
+  uso: EstadoUso | ''; // procedimientos: "" = en uso y obsoletos
 }
 
-export const FILTROS_VACIOS: Filtros = { texto: '', anio: '', area: '', estado: '' };
+export const FILTROS_VACIOS: Filtros = { texto: '', anio: '', area: '', estado: '', uso: '' };
 
 /** Cuántos días antes del vencimiento un documento pasa a "Por vencer". */
 export const DIAS_AVISO = 30;
@@ -94,18 +162,24 @@ export class DocumentosService {
     return this.categorias().pipe(map((r) => r.categorias.find((c) => c.id === id)));
   }
 
+  /** Agrega un tipo a la categoría. El back end responde 409 si el nombre ya existe. */
+  agregarTipo(categoria: string, nombre: string): Observable<Tipo> {
+    return this.http.post<Tipo>(`${this.api}/categorias/${encodeURIComponent(categoria)}/tipos`, { nombre });
+  }
+
   listar(categoria: string, tipo: string): Observable<Documento[]> {
     return this.http.get<Documento[]>(`${this.api}/documentos`, { params: { categoria, tipo } });
   }
 
-  /** Sube el PDF informando el progreso (para la barra de carga). */
+  /** Sube el archivo informando el progreso (para la barra de carga). */
   subir(categoria: string, tipo: string, archivo: File, datos: DatosDocumento): Observable<HttpEvent<Documento>> {
     const formulario = new FormData();
     // Los datos van ANTES del archivo para que el servidor ya los tenga al recibirlo
     formulario.append('categoria', categoria);
     formulario.append('tipo', tipo);
     for (const [clave, valor] of Object.entries(datos)) {
-      formulario.append(clave, Array.isArray(valor) ? valor.join(',') : valor);
+      if (valor === undefined || valor === null) continue;
+      formulario.append(clave, Array.isArray(valor) ? valor.join(',') : String(valor));
     }
     formulario.append('archivo', archivo, archivo.name);
     return this.http.post<Documento>(`${this.api}/documentos`, formulario, {
@@ -114,14 +188,15 @@ export class DocumentosService {
     });
   }
 
-  /** Cambia el nombre y los datos de un documento (el PDF queda igual). */
+  /** Cambia el nombre y los datos de un documento (el archivo queda igual). */
   actualizar(id: string, datos: DatosDocumento): Observable<Documento> {
     return this.http.patch<Documento>(`${this.api}/documentos/${id}`, datos);
   }
 
-  /** El PDF como Blob, para abrirlo en una pestaña nueva. */
-  archivo(id: string): Observable<Blob> {
-    return this.http.get(`${this.api}/documentos/${id}/archivo`, { responseType: 'blob' });
+  /** El archivo como Blob: para abrirlo en una pestaña nueva o guardarlo en la compu. */
+  archivo(id: string, descargar = false): Observable<Blob> {
+    const params = descargar ? { descargar: '1' } : undefined;
+    return this.http.get(`${this.api}/documentos/${id}/archivo`, { responseType: 'blob', params });
   }
 
   eliminar(id: string): Observable<void> {
@@ -215,8 +290,10 @@ export function filtrarDocumentos(docs: Documento[], f: Filtros, hoy = hoyIso())
     if (f.anio && anioDe(d) !== f.anio) return false;
     if (f.area && d.area !== f.area) return false;
     if (f.estado && !cumpleEstado(estadoVencimiento(d, hoy), f.estado)) return false;
+    if (f.uso && d.estadoUso !== f.uso) return false;
     if (buscado) {
-      const donde = normalizar([d.nombre, d.area, d.responsable, d.subidoPor].filter(Boolean).join(' '));
+      const campos = [d.nombre, d.area, d.responsable, d.subidoPor, d.codigo, d.realizo];
+      const donde = normalizar(campos.filter(Boolean).join(' '));
       if (!donde.includes(buscado)) return false;
     }
     return true;

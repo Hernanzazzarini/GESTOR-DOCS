@@ -7,18 +7,24 @@ import { Subscription, combineLatest } from 'rxjs';
 import { EncabezadoComponent } from '../encabezado/encabezado';
 import { AuthService } from '../../services/auth';
 import {
+  ACEPTA_ARCHIVOS,
   Categoria,
   DIAS_AVISO,
   DIAS_AVISO_POR_DEFECTO,
   DatosDocumento,
   Documento,
   DocumentosService,
+  ETIQUETAS_USO,
+  EstadoUso,
   EstadoVencimiento,
   FILTROS_VACIOS,
   FiltroEstado,
   Filtros,
+  LARGO_MAXIMO_TIPO,
   MAXIMO_AVISAR,
+  MAXIMO_COPIAS,
   MAXIMO_DIAS_AVISO,
+  MAXIMO_REVISION,
   TAMANIO_MAXIMO,
   anioDe,
   describirAviso,
@@ -29,6 +35,10 @@ import {
   formatearFecha,
   formatearTamanio,
   hoyIso,
+  extensionDe,
+  idDeNombre,
+  sinExtension,
+  tipoDeArchivo,
 } from '../../services/documentos';
 
 const DATOS_VACIOS: DatosDocumento = {
@@ -41,13 +51,32 @@ const DATOS_VACIOS: DatosDocumento = {
   avisar: [],
 };
 
-/** Ícono de cada tipo (si se agrega uno nuevo sin ícono, usa el de documento). */
+/** Datos extra de Procedimientos generales. */
+const PROCEDIMIENTO_VACIO = {
+  codigo: '',
+  realizo: '',
+  revision: null as number | null,
+  estadoUso: 'en-uso' as EstadoUso,
+  copias: 0 as number | null,
+  areasImpresion: [] as string[],
+};
+
+/** Ícono de cada tipo (los agregados usan el del tubo de ensayo, o el de la tabla en Procedimientos). */
 const ICONOS_TIPO: Record<string, string> = {
   'agua-microbiologico': '🦠',
   'agua-fisicoquimico': '💧',
   alergenos: '🥜',
   aflatoxinas: '🌾',
+  // Áreas de uso de Procedimientos generales
+  'seguridad-alimentaria': '🛡️',
+  calidad: '✅',
+  logistica: '🚚',
 };
+
+/** Entero entre 0 y máximo (los <input type="number"> devuelven null si están vacíos). */
+function esEntero(valor: number | null | undefined, maximo: number): boolean {
+  return valor !== null && valor !== undefined && Number.isInteger(valor) && valor >= 0 && valor <= maximo;
+}
 
 const EMAIL = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
 
@@ -63,6 +92,10 @@ const ETIQUETAS_ESTADO: Record<EstadoVencimiento, string> = {
  * (área, fechas, responsable, avisos de vencimiento) y buscar / abrir / editar / eliminar
  * los documentos de ese tipo. Los mails de aviso los manda apps-script/Avisos.gs.
  * URL: /documentos/analisis?tipo=aflatoxinas
+ *
+ * También es la pantalla de Procedimientos generales (/procedimientos?tipo=calidad): la ruta fija
+ * la categoría en data.categoria. Ahí los tipos son las áreas de uso y el formulario pide además
+ * código, realizó, Nro de revisión, estado (En uso / Obsoleto) y copias impresas por área.
  */
 @Component({
   selector: 'app-categoria',
@@ -87,6 +120,12 @@ export class CategoriaComponent implements OnInit {
   readonly describirAviso = describirAviso;
   readonly maximoDiasAviso = MAXIMO_DIAS_AVISO;
   readonly maximoAvisar = MAXIMO_AVISAR;
+  readonly largoMaximoTipo = LARGO_MAXIMO_TIPO;
+  readonly aceptaArchivos = ACEPTA_ARCHIVOS;
+  readonly tipoDeArchivo = tipoDeArchivo;
+  readonly etiquetasUso = ETIQUETAS_USO;
+  readonly maximoRevision = MAXIMO_REVISION;
+  readonly maximoCopias = MAXIMO_COPIAS;
 
   categoria: Categoria | null = null;
   tipo = '';
@@ -115,13 +154,21 @@ export class CategoriaComponent implements OnInit {
   editando: Documento | null = null;
   nuevoDia: number | null = null;
   nuevoAvisar = '';
+  nuevaAreaImpresion = '';
   errorAviso = '';
   progreso: number | null = null;
   mensajeExito = '';
   errorSubida = '';
 
+  // Agregar un tipo de análisis
+  agregandoTipo = false;
+  nombreNuevoTipo = '';
+  errorTipo = '';
+  guardandoTipo = false;
+
   // Eliminación (confirmación en la misma fila, RF-07)
   confirmando: string | null = null;
+  descargando: string | null = null; // id del archivo que se está descargando
   eliminando: string | null = null;
   errorEliminar = '';
 
@@ -134,7 +181,9 @@ export class CategoriaComponent implements OnInit {
           this.cargandoCategoria = false;
           this.puedeEliminar = r.puedeEliminar;
           this.miEmail = r.email.toLowerCase();
-          const categoria = r.categorias.find((c) => c.id === params.get('categoria')) ?? null;
+          // /documentos/:categoria o una ruta con la categoría fija (Procedimientos generales)
+          const id = params.get('categoria') ?? this.route.snapshot.data['categoria'];
+          const categoria = r.categorias.find((c) => c.id === id) ?? null;
           this.categoria = categoria;
           this.noExiste = !categoria;
           if (!categoria) return;
@@ -178,11 +227,84 @@ export class CategoriaComponent implements OnInit {
   }
 
   iconoTipo(id: string): string {
-    return ICONOS_TIPO[id] ?? '📄';
+    return ICONOS_TIPO[id] ?? (this.esProcedimiento ? '📋' : '🧪');
+  }
+
+  /** Procedimientos generales: datos extra y textos propios. */
+  get esProcedimiento(): boolean {
+    return !!this.categoria?.procedimiento;
+  }
+
+  /** "tipo de análisis" o "área de uso". */
+  get etiquetaTipo(): string {
+    return this.categoria?.etiquetaTipo ?? 'tipo de análisis';
+  }
+
+  /** "documento" o "procedimiento" (para los textos de la pantalla). */
+  get palabraDoc(): string {
+    return this.esProcedimiento ? 'procedimiento' : 'documento';
   }
 
   get nombreTipo(): string {
     return this.categoria?.tipos.find((t) => t.id === this.tipo)?.nombre ?? '';
+  }
+
+  // ── Agregar tipo de análisis ─────────────────────────────────────────
+
+  abrirNuevoTipo(): void {
+    this.agregandoTipo = true;
+    this.nombreNuevoTipo = '';
+    this.errorTipo = '';
+  }
+
+  cerrarNuevoTipo(): void {
+    this.agregandoTipo = false;
+    this.errorTipo = '';
+  }
+
+  /** Si el nombre ya existe (sin contar mayúsculas, acentos ni signos), devuelve el que existe. */
+  get tipoRepetido(): string {
+    const id = idDeNombre(this.nombreNuevoTipo);
+    return (id && this.categoria?.tipos.find((t) => t.id === id)?.nombre) || '';
+  }
+
+  /** Igual que el back end (servicios/tipos.js). */
+  get mensajeRepetido(): string {
+    return this.categoria?.etiquetaTipo
+      ? `Ya existe el ${this.etiquetaTipo} "${this.tipoRepetido}".`
+      : `Ya existe un tipo de análisis llamado "${this.tipoRepetido}".`;
+  }
+
+  guardarNuevoTipo(): void {
+    if (!this.categoria || this.guardandoTipo) return;
+    const nombre = this.nombreNuevoTipo.trim().replace(/\s+/g, ' ');
+    if (!idDeNombre(nombre)) {
+      this.errorTipo = `Escribí el nombre del ${this.etiquetaTipo}.`;
+      return;
+    }
+    if (this.tipoRepetido) {
+      this.errorTipo = this.mensajeRepetido;
+      return;
+    }
+    const categoria = this.categoria;
+    this.guardandoTipo = true;
+    this.errorTipo = '';
+    this.documentos.agregarTipo(categoria.id, nombre).subscribe({
+      next: (tipo) => {
+        this.guardandoTipo = false;
+        this.agregandoTipo = false;
+        // Se suma a la lista guardada de categorías, así la tarjeta aparece sin recargar
+        if (!categoria.tipos.some((t) => t.id === tipo.id)) categoria.tipos.push(tipo);
+        // Se pasa a la tarjeta nueva; el mensaje va después porque al cambiar de tipo se borran
+        this.router
+          .navigate([], { relativeTo: this.route, queryParams: { tipo: tipo.id }, replaceUrl: true })
+          .then(() => (this.mensajeExito = `Se agregó el ${this.etiquetaTipo} "${tipo.nombre}".`));
+      },
+      error: (err) => {
+        this.guardandoTipo = false;
+        this.errorTipo = describirError(err, `No se pudo agregar el ${this.etiquetaTipo}.`);
+      },
+    });
   }
 
   // ── Búsqueda ─────────────────────────────────────────────────────────
@@ -233,7 +355,7 @@ export class CategoriaComponent implements OnInit {
 
   get hayFiltros(): boolean {
     const f = this.filtros;
-    return !!(f.texto || f.area || f.estado); // el año se ve en las pestañas
+    return !!(f.texto || f.area || f.estado || f.uso); // el año se ve en las pestañas
   }
 
   limpiarFiltros(): void {
@@ -281,6 +403,7 @@ export class CategoriaComponent implements OnInit {
   abrirFormulario(): void {
     this.limpiarMensajes();
     this.formularioAbierto = true;
+    if (this.esProcedimiento && this.datos.estadoUso === undefined) this.datos = { ...this.datos, ...PROCEDIMIENTO_VACIO };
   }
 
   cerrarFormulario(): void {
@@ -317,10 +440,9 @@ export class CategoriaComponent implements OnInit {
     this.archivo = null;
     if (!archivo) return;
 
-    // RF-08: solo PDF (el servidor lo vuelve a controlar)
-    const esPdf = archivo.type === 'application/pdf' || archivo.name.toLowerCase().endsWith('.pdf');
-    if (!esPdf) {
-      this.errorSubida = 'Solo se aceptan archivos PDF.';
+    // RF-08: PDF, Word o Excel (el servidor lo vuelve a controlar)
+    if (!extensionDe(archivo.name)) {
+      this.errorSubida = 'Solo se aceptan archivos PDF, Word (.doc, .docx) o Excel (.xls, .xlsx).';
       this.reiniciarSelector();
       return;
     }
@@ -331,14 +453,22 @@ export class CategoriaComponent implements OnInit {
     }
     this.archivo = archivo;
     // Se propone el nombre del archivo; se puede cambiar antes de subir
-    if (!this.datos.nombre) this.datos.nombre = archivo.name.replace(/\.pdf$/i, '');
+    if (!this.datos.nombre) this.datos.nombre = sinExtension(archivo.name);
   }
 
   /** Qué falta para poder subir (null = está todo). */
   get faltante(): string | null {
     const d = this.datos;
-    if (!this.editando && !this.archivo) return 'Elegí el archivo PDF.';
-    if (!d.area.trim()) return 'Completá el área.';
+    if (!this.editando && !this.archivo) return 'Elegí el archivo.';
+    if (this.esProcedimiento) {
+      if (!d.codigo?.trim()) return 'Completá el código.';
+      if (!d.nombre.trim()) return 'Completá el nombre del documento.';
+      if (!d.realizo?.trim()) return 'Completá quién lo realizó.';
+      if (!esEntero(d.revision, MAXIMO_REVISION)) return 'Completá el Nro de revisión (0 a 999).';
+      if (!d.estadoUso) return 'Elegí si está En uso u Obsoleto.';
+      if (!esEntero(d.copias ?? 0, MAXIMO_COPIAS)) return 'La cantidad de copias tiene que ser de 0 a 999.';
+      if (d.copias && !d.areasImpresion?.length) return 'Agregá en qué área están las copias impresas.';
+    } else if (!d.area.trim()) return 'Completá el área.';
     if (!d.fechaRealizacion) return 'Completá la fecha de realización.';
     if (!d.responsable.trim()) return 'Completá el responsable.';
     if (!EMAIL.test(d.responsable.trim())) return 'El responsable tiene que ser un mail.';
@@ -348,6 +478,19 @@ export class CategoriaComponent implements OnInit {
     return null;
   }
 
+  /**
+   * Lo que se manda al back end. En Procedimientos el área es el área de uso (la pone el servidor);
+   * en las demás categorías no se mandan los datos de procedimiento.
+   */
+  private datosParaEnviar(): DatosDocumento {
+    if (this.esProcedimiento) {
+      const copias = this.datos.copias ?? 0;
+      return { ...this.datos, area: this.nombreTipo, copias, areasImpresion: copias ? this.datos.areasImpresion : [] };
+    }
+    const { codigo, realizo, revision, estadoUso, copias, areasImpresion, ...resto } = this.datos;
+    return resto;
+  }
+
   subir(): void {
     if (this.editando) return this.guardarEdicion();
     if (this.faltante || !this.archivo || !this.categoria || !this.tipo || this.progreso !== null) return;
@@ -355,7 +498,7 @@ export class CategoriaComponent implements OnInit {
     this.progreso = 0;
     const tipoAlSubir = this.tipo;
 
-    this.documentos.subir(this.categoria.id, this.tipo, this.archivo, this.datos).subscribe({
+    this.documentos.subir(this.categoria.id, this.tipo, this.archivo, this.datosParaEnviar()).subscribe({
       next: (evento) => {
         if (evento.type === HttpEventType.UploadProgress && evento.total) {
           this.progreso = Math.round((evento.loaded / evento.total) * 100);
@@ -363,13 +506,16 @@ export class CategoriaComponent implements OnInit {
         if (evento.type === HttpEventType.Response && evento.body) {
           const doc = evento.body;
           const anio = doc.fechaRealizacion?.slice(0, 4) ?? '';
-          this.mensajeExito = `"${doc.nombre}" se guardó en ${this.categoria!.nombre} › ${this.nombreTipo} › ${anio}.`;
+          const codigo = doc.codigo ? `${doc.codigo} · ` : '';
+          this.mensajeExito = `"${codigo}${doc.nombre}" se guardó en ${this.categoria!.nombre} › ${this.nombreTipo} › ${anio}.`;
           if (this.tipo === tipoAlSubir) this.docs = [doc, ...this.docs];
           this.progreso = null;
           this.archivo = null;
           // Área, responsable y avisos suelen repetirse al cargar varios: se dejan puestos
-          const { area, responsable, diasAviso, avisar } = this.datos;
+          // (en Procedimientos, también quién lo realizó)
+          const { area, responsable, diasAviso, avisar, realizo } = this.datos;
           this.datos = { ...DATOS_VACIOS, area, responsable, diasAviso, avisar };
+          if (this.esProcedimiento) this.datos = { ...this.datos, ...PROCEDIMIENTO_VACIO, realizo };
           this.reiniciarSelector();
         }
       },
@@ -430,6 +576,36 @@ export class CategoriaComponent implements OnInit {
     this.datos.avisar = this.datos.avisar.filter((e) => e !== email);
   }
 
+  // ── Copias impresas (Procedimientos) ─────────────────────────────────
+
+  /** Sugerencias para "en qué área está impreso": las áreas de uso y las ya usadas. */
+  get sugerenciasImpresion(): string[] {
+    const usadas = this.docs.flatMap((d) => d.areasImpresion ?? []);
+    const todas = [...(this.categoria?.tipos.map((t) => t.nombre) ?? []), ...usadas];
+    const elegidas = this.datos.areasImpresion ?? [];
+    return [...new Set(todas)].filter((a) => !elegidas.includes(a)).sort((a, b) => a.localeCompare(b, 'es'));
+  }
+
+  agregarAreaImpresion(): void {
+    this.errorAviso = '';
+    const area = this.nuevaAreaImpresion.trim().replace(/\s+/g, ' ').replace(/,/g, ' ');
+    if (!area) return;
+    const actuales = this.datos.areasImpresion ?? [];
+    if (!actuales.some((a) => a.toLowerCase() === area.toLowerCase())) {
+      const siguiente = [...actuales, area];
+      if (new TextEncoder().encode(siguiente.join(',')).length > 100) {
+        this.errorAviso = 'Las áreas donde está impreso pueden tener hasta 100 caracteres en total.';
+        return;
+      }
+      this.datos.areasImpresion = siguiente;
+    }
+    this.nuevaAreaImpresion = '';
+  }
+
+  quitarAreaImpresion(area: string): void {
+    this.datos.areasImpresion = (this.datos.areasImpresion ?? []).filter((a) => a !== area);
+  }
+
   // ── Edición ──────────────────────────────────────────────────────────
 
   puedeEditar(doc: Documento): boolean {
@@ -444,7 +620,7 @@ export class CategoriaComponent implements OnInit {
     this.editando = doc;
     this.formularioAbierto = true;
     this.datos = {
-      nombre: doc.nombre.replace(/\.pdf$/i, ''),
+      nombre: sinExtension(doc.nombre),
       area: doc.area ?? '',
       fechaRealizacion: doc.fechaRealizacion ?? '',
       fechaVencimiento: doc.fechaVencimiento ?? '',
@@ -452,6 +628,17 @@ export class CategoriaComponent implements OnInit {
       diasAviso: doc.fechaVencimiento ? [...doc.diasAviso] : DIAS_AVISO_POR_DEFECTO,
       avisar: [...doc.avisar],
     };
+    if (this.esProcedimiento) {
+      this.datos = {
+        ...this.datos,
+        codigo: doc.codigo ?? '',
+        realizo: doc.realizo ?? '',
+        revision: doc.revision ?? null,
+        estadoUso: doc.estadoUso ?? 'en-uso',
+        copias: doc.copias ?? 0,
+        areasImpresion: [...(doc.areasImpresion ?? [])],
+      };
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -468,7 +655,7 @@ export class CategoriaComponent implements OnInit {
     if (!doc || this.faltante || this.progreso !== null) return;
     this.limpiarMensajes();
     this.progreso = 0;
-    this.documentos.actualizar(doc.id, this.datos).subscribe({
+    this.documentos.actualizar(doc.id, this.datosParaEnviar()).subscribe({
       next: (actualizado) => {
         this.progreso = null;
         this.docs = this.docs.map((d) => (d.id === actualizado.id ? actualizado : d));
@@ -493,7 +680,48 @@ export class CategoriaComponent implements OnInit {
     this.confirmando = null;
   }
 
-  // ── Ver y eliminar ───────────────────────────────────────────────────
+  // ── Ver, descargar y eliminar ────────────────────────────────────────
+
+  /** "ana@empresa.com" → ["ana", "@empresa.com"] (para cortar la línea en la @). */
+  partesMail(mail: string): [string, string] {
+    const i = mail.indexOf('@');
+    return i > 0 ? [mail.slice(0, i), mail.slice(i)] : [mail, ''];
+  }
+
+  /** 📄 PDF, 📝 Word, 📊 Excel (para el archivo elegido antes de subirlo). */
+  iconoArchivo(nombre: string): string {
+    const clase = tipoDeArchivo(extensionDe(nombre) ?? 'pdf').clase;
+    return clase === 'word' ? '📝' : clase === 'excel' ? '📊' : '📄';
+  }
+
+  /** Solo los PDF se pueden ver en el navegador; Word y Excel se descargan. */
+  abrir(doc: Documento): void {
+    if (doc.formato === 'pdf') this.ver(doc);
+    else this.descargar(doc);
+  }
+
+  /** Guarda el archivo en la compu (en Descargas), con su nombre. */
+  descargar(doc: Documento): void {
+    this.limpiarMensajes();
+    this.descargando = doc.id;
+    this.documentos.archivo(doc.id, true).subscribe({
+      next: (blob) => {
+        this.descargando = null;
+        const url = URL.createObjectURL(blob);
+        const enlace = document.createElement('a');
+        enlace.href = url;
+        enlace.download = doc.nombre;
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      },
+      error: () => {
+        this.descargando = null;
+        this.errorEliminar = `No se pudo descargar "${doc.nombre}".`;
+      },
+    });
+  }
 
   /** Abre el PDF en una pestaña nueva. La pestaña se abre ANTES de pedirlo para que Safari no la bloquee. */
   ver(doc: Documento): void {
@@ -518,6 +746,7 @@ export class CategoriaComponent implements OnInit {
 
   /** Texto corto para la tabla: "Avisa 30, 7 y 0 días antes a 3 personas". */
   resumenAvisos(doc: Documento): string {
+    if (doc.estadoUso === 'obsoleto') return 'Sin avisos (obsoleto)';
     if (!doc.fechaVencimiento || !doc.diasAviso.length) return 'Sin avisos';
     const personas = 1 + doc.avisar.length;
     const dias = doc.diasAviso.map((d) => (d === 0 ? 'el día' : `${d} d`)).join(', ');

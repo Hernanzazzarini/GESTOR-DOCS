@@ -41,7 +41,8 @@ export class DocumentosComponent implements OnInit {
       .subscribe({
         next: (r) => {
           clearTimeout(aviso);
-          this.categorias = r.categorias;
+          // Procedimientos generales tiene su propia tarjeta en Inicio
+          this.categorias = r.categorias.filter((c) => (c.modulo ?? 'documentos') === 'documentos');
           this.cargando = false;
         },
         error: (err) => {

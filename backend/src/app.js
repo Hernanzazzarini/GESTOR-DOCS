@@ -3,7 +3,9 @@ import express from 'express';
 import { crearControladorDocumentos } from './controllers/documentos.js';
 import { manejarErrores } from './middlewares/errores.js';
 import { crearRutas } from './routes/index.js';
+import { crearServicioCarpetas } from './servicios/carpetas.js';
 import { crearServicioDocumentos } from './servicios/documentos.js';
+import { crearServicioTipos } from './servicios/tipos.js';
 
 /**
  * Arma la aplicación Express. Recibe las dependencias desde afuera (Drive, verificador de
@@ -25,8 +27,11 @@ export function crearApp({ drive, rootFolderId, verificarToken, leerPerfil, orig
   );
   app.use(express.json());
 
-  const documentos = crearServicioDocumentos(drive, rootFolderId);
-  const controlador = crearControladorDocumentos(documentos);
+  // Las mismas carpetas para los dos: así comparten lo que ya se buscó en Drive
+  const carpetas = crearServicioCarpetas(drive);
+  const documentos = crearServicioDocumentos(drive, rootFolderId, carpetas);
+  const tipos = crearServicioTipos(carpetas, rootFolderId);
+  const controlador = crearControladorDocumentos(documentos, tipos);
   app.use('/api', crearRutas({ controlador, verificarToken, leerPerfil }));
 
   app.use((_req, res) => res.status(404).json({ mensaje: 'Ruta inexistente.' }));

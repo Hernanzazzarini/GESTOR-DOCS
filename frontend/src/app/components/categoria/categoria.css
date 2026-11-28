@@ -116,6 +116,44 @@ h3 {
   font-size: 0.95rem;
 }
 
+/* Tarjeta "Agregar tipo" y su formulario */
+.tipo-agregar {
+  border-style: dashed;
+  color: var(--azul-oscuro);
+  background: transparent;
+}
+.tipo-agregar .tipo-icono {
+  background: var(--azul-suave);
+  font-weight: 700;
+}
+.nuevo-tipo {
+  margin-bottom: 1.25rem;
+  border-left: 5px solid var(--azul);
+}
+.nuevo-tipo label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.nuevo-tipo-fila {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.nuevo-tipo-fila input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.nuevo-tipo-error,
+.nuevo-tipo-ayuda {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--gris);
+}
+.nuevo-tipo-error {
+  color: #c0392b;
+}
+
 /* ── Formulario ───────────────────────────────────────────── */
 
 .formulario {
@@ -220,6 +258,78 @@ h3 {
 
 .obligatorio {
   color: #c0392b;
+}
+
+/* Procedimientos generales */
+.etiqueta-campo {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-weight: 500;
+  color: #34495e;
+  font-size: 0.9rem;
+}
+
+.opciones-uso {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.opciones-uso .opcion-uso {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.opcion-uso input {
+  width: auto;
+  margin: 0;
+}
+
+.opcion-uso.elegida {
+  border-color: #1e7b3c;
+  background: #e7f6ec;
+  color: #1e7b3c;
+}
+
+.opcion-obsoleto.elegida {
+  border-color: #64748b;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.area-fija {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.9rem;
+}
+
+.uso {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.uso-en-uso {
+  background: #e7f6ec;
+  color: #1e7b3c;
+}
+
+.uso-obsoleto {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.celda-codigo .nota,
+.celda-copias .nota {
+  display: block;
 }
 
 select.sin-elegir {
@@ -605,6 +715,14 @@ select.sin-elegir {
   font-weight: 800;
   letter-spacing: 0.03em;
 }
+.doc-icono.doc-word {
+  background: #e8f0fe;
+  color: #1f5bb5;
+}
+.doc-icono.doc-excel {
+  background: #e6f4ea;
+  color: #1e7e45;
+}
 
 .doc-texto {
   display: flex;
@@ -665,9 +783,16 @@ select.sin-elegir {
   overflow-wrap: anywhere;
 }
 
+/* Acciones en dos columnas (Ver | Descargar / Editar | Eliminar): la tabla entra sin barra */
 .acciones {
-  white-space: nowrap;
-  text-align: right;
+  width: 1px;
+}
+
+.acciones-grupo {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 0.35rem;
+  justify-content: end;
 }
 
 .accion {
@@ -678,11 +803,8 @@ select.sin-elegir {
   font: inherit;
   font-size: 0.85rem;
   color: #34495e;
+  white-space: nowrap;
   cursor: pointer;
-}
-
-.accion + .accion {
-  margin-left: 0.35rem;
 }
 
 .accion:hover {
@@ -696,6 +818,8 @@ select.sin-elegir {
 }
 
 .confirmar {
+  display: block;
+  min-width: 8.5rem;
   font-size: 0.9rem;
   color: #c0392b;
 }
@@ -769,7 +893,13 @@ select.sin-elegir {
   }
 
   .tabla .acciones {
-    text-align: left;
+    width: auto;
+  }
+
+  .acciones-grupo {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .paso-numero {
